@@ -220,3 +220,60 @@ fn failures_by_category_returns_correct_subset() {
         assert!(failures.is_empty(), "unexpected failure in {:?}: {:?}", cat, failures);
     }
 }
+
+// ── Trust revocation (M9) ─────────────────────────────────────────────────────
+
+use crate::revocation::{
+    plan_revocation, RevocationPackage, RevocationSeverity, RevokedKey,
+};
+
+fn make_revocation(severity: RevocationSeverity, keys: Vec<&str>, hashes: Vec<&str>)
+    -> RevocationPackage
+{
+    RevocationPackage {
+        signer_id: "master-key-001".to_string(),
+        issued_at: 0,
+        severity,
+        revoked_keys: keys.into_iter().map(|k| RevokedKey {
+            signing_key_id: k.to_string(),
+            compromised_from: 0,
+        }).collect(),
+        revoked_package_hashes: hashes.iter().map(|h| h.to_string()).collect(),
+        user_message_key: "update.available".to_string(),
+        replacement_hint: None,
+    }
+}
+
+#[test]
+fn revocation_plan_has_correct_key_count() {
+    let rev = make_revocation(RevocationSeverity::Advisory,
+        vec!["key-1", "key-2"], vec![]);
+    let plan = plan_revocation(&rev);
+    assert_eq!(plan.keys_to_revoke.len(), 2);
+    assert!(plan.has_changes());
+}
+
+#[test]
+fn revocation_plan_has_package_hashes() {
+    let rev = make_revocation(RevocationSeverity::Critical,
+        vec![], vec!["abc123", "def456"]);
+    let plan = plan_revocation(&rev);
+    assert_eq!(plan.packages_to_quarantine.len(), 2);
+    assert!(plan.is_critical());
+}
+
+#[test]
+fn revocation_empty_plan_no_changes() {
+    let rev = make_revocation(RevocationSeverity::Informational, vec![], vec![]);
+    let plan = plan_revocation(&rev);
+    assert!(!plan.has_changes());
+    assert!(!plan.is_critical());
+}
+
+#[test]
+fn informational_revocation_is_not_critical() {
+    let rev = make_revocation(RevocationSeverity::Informational,
+        vec!["key-old"], vec![]);
+    let plan = plan_revocation(&rev);
+    assert!(!plan.is_critical());
+}

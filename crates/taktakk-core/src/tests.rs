@@ -320,3 +320,149 @@ fn health_report_summary_format() {
     let s = report.summary();
     assert!(s.contains("checks passed"), "summary should mention 'checks passed': {s}");
 }
+
+// ── Release manifest (M8) ─────────────────────────────────────────────────────
+
+use crate::use_cases::release::{
+    ArtifactKind, ArtifactRecord, ReleaseManifest, SeedKitManifest, SeedKitProfile,
+};
+
+fn valid_manifest() -> ReleaseManifest {
+    ReleaseManifest {
+        version: "0.8.0".to_string(),
+        git_commit: "a".repeat(40),
+        rust_toolchain: "1.91.1".to_string(),
+        build_profile: "release".to_string(),
+        artifacts: vec![],
+        built_at: "2026-05-09T00:00:00Z".to_string(),
+        features: vec![],
+    }
+}
+
+#[test]
+fn release_manifest_valid() {
+    assert!(valid_manifest().validate().is_ok());
+}
+
+#[test]
+fn release_manifest_empty_version_fails() {
+    let mut m = valid_manifest();
+    m.version = String::new();
+    assert!(m.validate().is_err());
+}
+
+#[test]
+fn release_manifest_short_commit_fails() {
+    let mut m = valid_manifest();
+    m.git_commit = "abc123".to_string();
+    assert!(m.validate().is_err());
+}
+
+#[test]
+fn release_manifest_bad_commit_chars_fails() {
+    let mut m = valid_manifest();
+    m.git_commit = "z".repeat(40); // 'z' is not hex
+    assert!(m.validate().is_err());
+}
+
+#[test]
+fn release_manifest_artifact_checksum_validated() {
+    let mut m = valid_manifest();
+    m.artifacts.push(ArtifactRecord {
+        name: "taktakk-linux".to_string(),
+        sha256: "bad".to_string(), // too short
+        byte_size: 1000,
+        kind: ArtifactKind::LinuxBinary,
+    });
+    assert!(m.validate_checksums().is_err());
+}
+
+#[test]
+fn seed_kit_profiles_have_ordered_sizes() {
+    let min = SeedKitProfile::Minimal.target_bytes();
+    let std = SeedKitProfile::Standard.target_bytes();
+    let full = SeedKitProfile::Full.target_bytes();
+    assert!(min < std);
+    assert!(std < full);
+}
+
+#[test]
+fn seed_kit_manifest_validates() {
+    let m = SeedKitManifest {
+        profile: SeedKitProfile::Minimal,
+        version: "0.8.0".to_string(),
+        package_ids: vec!["shield-water".to_string()],
+        estimated_bytes: 1024 * 1024,
+        manifest_hash: "a".repeat(64),
+    };
+    assert!(m.validate().is_ok());
+    assert!(m.check_size_budget().is_ok());
+}
+
+#[test]
+fn seed_kit_over_budget_fails() {
+    let m = SeedKitManifest {
+        profile: SeedKitProfile::Minimal,
+        version: "0.8.0".to_string(),
+        package_ids: vec!["pkg".to_string()],
+        estimated_bytes: 100 * 1024 * 1024, // 100 MiB >> 5 MiB budget
+        manifest_hash: "a".repeat(64),
+    };
+    assert!(m.check_size_budget().is_err());
+}
+
+#[test]
+fn empty_seed_kit_fails_validation() {
+    let m = SeedKitManifest {
+        profile: SeedKitProfile::Standard,
+        version: "0.8.0".to_string(),
+        package_ids: vec![],
+        estimated_bytes: 0,
+        manifest_hash: "a".repeat(64),
+    };
+    assert!(m.validate().is_err());
+}
+
+// ── Health check service (M9) ─────────────────────────────────────────────────
+
+use crate::use_cases::health_check::{
+    run_static_health_checks, ContentLifecycleState, HealthSeverity,
+};
+
+#[test]
+fn health_check_healthy_with_packages_and_anchors() {
+    let report = run_static_health_checks(3, 2, 2, Some(500 * 1024 * 1024), 0);
+    assert!(report.is_healthy(), "should be healthy: {}", report.summary());
+    assert_eq!(report.count(&HealthSeverity::Error), 0);
+}
+
+#[test]
+fn health_check_error_when_no_trust_anchors() {
+    let report = run_static_health_checks(1, 0, 1, None, 0);
+    assert!(!report.is_healthy());
+    assert!(report.count(&HealthSeverity::Error) > 0);
+}
+
+#[test]
+fn health_check_warning_when_no_packages() {
+    let report = run_static_health_checks(0, 1, 1, None, 0);
+    assert!(report.count(&HealthSeverity::Warning) > 0);
+}
+
+#[test]
+fn health_check_warning_on_low_storage() {
+    let report = run_static_health_checks(1, 1, 1, Some(10 * 1024 * 1024), 0);
+    assert!(report.count(&HealthSeverity::Warning) > 0);
+}
+
+#[test]
+fn content_lifecycle_runnable_states() {
+    assert!(ContentLifecycleState::Active.is_runnable());
+    assert!(ContentLifecycleState::Deprecated {
+        replaced_by: "v2".to_string()
+    }.is_runnable());
+    assert!(!ContentLifecycleState::Disabled {
+        reason_key: "r".to_string()
+    }.is_runnable());
+    assert!(!ContentLifecycleState::Quarantined.is_runnable());
+}

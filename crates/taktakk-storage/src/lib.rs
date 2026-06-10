@@ -10,6 +10,8 @@ pub mod error;
 pub mod event_log;
 pub mod object_store;
 pub mod repo;
+pub mod failure_injection;
+pub mod maintenance;
 pub mod wipe;
 
 pub use db::Database;

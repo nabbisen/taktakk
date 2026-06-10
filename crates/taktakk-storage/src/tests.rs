@@ -550,3 +550,99 @@ async fn import_job_lifecycle() {
     assert_eq!(status, "installed");
     assert_eq!(count, 3);
 }
+
+// ── Failure injection (M8) ────────────────────────────────────────────────────
+
+use crate::failure_injection::{
+    cleanup_partial_files, generate_corrupt_package, has_partial_files,
+    write_partial, FailureClass, FaultInjectingStore,
+};
+
+#[test]
+fn fault_injecting_store_fails_after_n_writes() {
+    use crate::object_store::FsObjectStore;
+    let dir = TempDir::new();
+    let inner = FsObjectStore::new(dir.path().join("objs"));
+    let store = FaultInjectingStore::new(inner, 2); // fail after 2 writes
+
+    assert!(store.put(b"first").is_ok());
+    assert!(store.put(b"second").is_ok());
+    assert!(store.put(b"third").is_err()); // 3rd write fails
+    assert_eq!(store.writes_completed(), 3);
+}
+
+#[test]
+fn generate_corrupt_empty_is_empty() {
+    assert!(generate_corrupt_package(&FailureClass::EmptyFile).is_empty());
+}
+
+#[test]
+fn generate_corrupt_bad_magic_not_nmp() {
+    use taktakk_core::domain::package::check_magic;
+    let data = generate_corrupt_package(&FailureClass::CorruptMagic);
+    assert!(!check_magic(&data));
+}
+
+#[test]
+fn write_partial_creates_partial_file() {
+    let dir = TempDir::new();
+    let data = b"full object data";
+    write_partial(dir.path(), data, 5).unwrap();
+    assert!(has_partial_files(dir.path()));
+}
+
+#[test]
+fn cleanup_partial_removes_files() {
+    let dir = TempDir::new();
+    std::fs::write(dir.path().join("abc.partial"), b"partial").unwrap();
+    let count = cleanup_partial_files(dir.path());
+    assert_eq!(count, 1);
+    assert!(!has_partial_files(dir.path()));
+}
+
+// ── Storage maintenance (M9) ──────────────────────────────────────────────────
+
+use crate::maintenance::{expire_quarantine, gc_object_store, spot_check_objects};
+
+#[test]
+fn gc_removes_orphaned_objects() {
+    use std::collections::HashSet;
+    use crate::object_store::FsObjectStore;
+    use taktakk_core::ports::package_store::ObjectStore;
+
+    let dir = TempDir::new();
+    let store = FsObjectStore::new(dir.path().to_path_buf());
+
+    let h1 = store.put(b"referenced").unwrap();
+    let h2 = store.put(b"orphan").unwrap();
+
+    let mut referenced = HashSet::new();
+    referenced.insert(h1.clone());
+
+    let deleted = gc_object_store(dir.path(), &referenced);
+    assert_eq!(deleted, 1);
+    assert!(store.exists(&h1).unwrap());
+    assert!(!store.exists(&h2).unwrap());
+}
+
+#[test]
+fn spot_check_all_valid_returns_no_corrupt() {
+    use crate::object_store::FsObjectStore;
+    use taktakk_core::ports::package_store::ObjectStore;
+
+    let dir = TempDir::new();
+    let store = FsObjectStore::new(dir.path().to_path_buf());
+    let h = store.put(b"valid object").unwrap();
+
+    let (verified, corrupt) = spot_check_objects(dir.path(), &[h], 10);
+    assert_eq!(verified, 1);
+    assert_eq!(corrupt, 0);
+}
+
+#[tokio::test]
+async fn maintenance_report_is_clean_on_fresh_db() {
+    use crate::maintenance::MaintenanceReport;
+    let report = MaintenanceReport::default();
+    assert!(report.is_clean());
+    assert_eq!(report.objects_corrupt_found, 0);
+}
