@@ -1,58 +1,133 @@
-//! Event log with 24-hour automatic retention.
+//! Event log — safe boundary API (RFC-041).
 //!
-//! The log records generic operational events (opens, closes, install outcomes)
-//! without storing module names, user identifiers, or content details.
-//! It is the only persistent log in taktakk; all other diagnostic output
-//! stays in a bounded in-memory ring buffer.
+//! The only persistent log in taktakk. Stores anonymous operational events;
+//! never module names, user identifiers, file paths, or peer IDs.
+//!
+//! ## Public API
+//!
+//! - `log_event()` — the sole write entry point. Takes a typed `EventBucket`
+//!   and an optional `SafeEventDetail`. Rejects at the type level any attempt
+//!   to store free-form strings.
+//! - `purge_old()`, `wipe_all()`, `recent()` — read/maintenance.
+//!
+//! `append()` is private and used only by `log_event()`. Test code may use
+//! the `#[cfg(test)]` re-export `append_for_test()`.
 
+use uuid::Uuid;
 use sqlx::SqlitePool;
+
+use taktakk_core::use_cases::safety_settings::EventBucket;
 
 use crate::error::StorageResult;
 
-/// A single event record.
-#[derive(Debug, Clone)]
-pub struct EventRecord {
-    pub event_id: String,
-    /// Generic tag (e.g. `"session.start"`, `"install.ok"`, `"wipe.keys"`).
-    /// Must not contain module names, user aliases, or PII.
-    pub event_tag: String,
-    /// Unix timestamp (seconds).
-    pub ts: i64,
-    /// Optional opaque JSON detail. Must be pre-redacted before storage.
-    pub detail_json: Option<String>,
+// ── Safe event detail ─────────────────────────────────────────────────────────
+
+/// A log detail payload with no free-text fields.
+///
+/// All fields are numeric. There is no `String` or `Value` field to prevent
+/// module names, peer IDs, file paths, or user data from entering the log.
+#[derive(Debug, Clone, Default)]
+pub struct SafeEventDetail {
+    /// Numeric error code — never an error message string.
+    pub error_code: Option<u32>,
+    /// Object count (e.g. packages transferred in a sync).
+    pub object_count: Option<u32>,
+    /// Elapsed time in milliseconds (performance logging only).
+    pub elapsed_ms: Option<u32>,
 }
 
-/// Append one event to the log.
-pub async fn append(pool: &SqlitePool, record: &EventRecord) -> StorageResult<()> {
+impl SafeEventDetail {
+    fn to_json(&self) -> String {
+        let parts: Vec<String> = [
+            self.error_code.map(|v| format!("\"err\":{v}")),
+            self.object_count.map(|v| format!("\"n\":{v}")),
+            self.elapsed_ms.map(|v| format!("\"ms\":{v}")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        if parts.is_empty() {
+            "{}".to_string()
+        } else {
+            format!("{{{}}}", parts.join(","))
+        }
+    }
+}
+
+// ── Internal record (private) ─────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+struct EventRecord {
+    event_id:       String,
+    event_tag:      String,
+    ts:             i64,
+    retention_until: i64,
+    detail_json:    Option<String>,
+}
+
+/// Append one event. Private — callers must use `log_event()`.
+async fn append(pool: &SqlitePool, record: &EventRecord) -> StorageResult<()> {
     sqlx::query(
-        "INSERT INTO event_log (event_id, event_tag, ts, detail_json)
-         VALUES (?, ?, ?, ?)",
+        "INSERT INTO event_log (event_id, event_tag, ts, retention_until, detail_json)
+         VALUES (?, ?, ?, ?, ?)",
     )
     .bind(&record.event_id)
     .bind(&record.event_tag)
     .bind(record.ts)
+    .bind(record.retention_until)
     .bind(&record.detail_json)
     .execute(pool)
     .await?;
     Ok(())
 }
 
-/// Delete all events older than `retention_seconds` from `now`.
+// ── Public API ────────────────────────────────────────────────────────────────
+
+/// The only public write path for the event log.
 ///
-/// Call periodically (e.g. on session start) to enforce the 24-hour policy.
-pub async fn purge_old(pool: &SqlitePool, now: i64, retention_seconds: i64) -> StorageResult<u64> {
-    let cutoff = now - retention_seconds;
-    let result = sqlx::query("DELETE FROM event_log WHERE ts < ?")
-        .bind(cutoff)
+/// Accepts only approved `EventBucket` values and a `SafeEventDetail`
+/// with no free-text fields. Automatically sets a `retention_until`
+/// timestamp of `now + 86_400` (24 hours).
+pub async fn log_event(
+    pool: &SqlitePool,
+    bucket: EventBucket,
+    detail: Option<SafeEventDetail>,
+    now: i64,
+) -> StorageResult<()> {
+    let record = EventRecord {
+        event_id:       Uuid::new_v4().to_string(),
+        event_tag:      bucket.tag().to_string(),
+        ts:             now,
+        retention_until: now + 86_400,
+        detail_json:    detail.map(|d| d.to_json()),
+    };
+    append(pool, &record).await
+}
+
+/// Delete events whose `retention_until` has passed.
+pub async fn purge_old(pool: &SqlitePool, now: i64) -> StorageResult<u64> {
+    let result = sqlx::query("DELETE FROM event_log WHERE retention_until < ?")
+        .bind(now)
         .execute(pool)
         .await?;
     Ok(result.rows_affected())
 }
 
+/// Delete all events — used during panic wipe.
+pub async fn wipe_all(pool: &SqlitePool) -> StorageResult<()> {
+    sqlx::query("DELETE FROM event_log").execute(pool).await?;
+    Ok(())
+}
+
 /// Retrieve recent events (newest first, up to `limit`).
-pub async fn recent(pool: &SqlitePool, limit: i64) -> StorageResult<Vec<EventRecord>> {
-    let rows = sqlx::query_as::<_, (String, String, i64, Option<String>)>(
-        "SELECT event_id, event_tag, ts, detail_json
+/// Returns `(event_tag, ts, detail_json)` triples.
+pub async fn recent(
+    pool: &SqlitePool,
+    limit: i64,
+) -> StorageResult<Vec<(String, i64, Option<String>)>> {
+    let rows = sqlx::query_as::<_, (String, i64, Option<String>)>(
+        "SELECT event_tag, ts, detail_json
          FROM event_log
          ORDER BY ts DESC
          LIMIT ?",
@@ -60,20 +135,23 @@ pub async fn recent(pool: &SqlitePool, limit: i64) -> StorageResult<Vec<EventRec
     .bind(limit)
     .fetch_all(pool)
     .await?;
-
-    Ok(rows
-        .into_iter()
-        .map(|(event_id, event_tag, ts, detail_json)| EventRecord {
-            event_id,
-            event_tag,
-            ts,
-            detail_json,
-        })
-        .collect())
+    Ok(rows)
 }
 
-/// Delete all events — used during panic wipe.
-pub async fn wipe_all(pool: &SqlitePool) -> StorageResult<()> {
-    sqlx::query("DELETE FROM event_log").execute(pool).await?;
-    Ok(())
+// ── Test-only escape hatch ────────────────────────────────────────────────────
+
+#[cfg(test)]
+pub async fn append_for_test(
+    pool: &SqlitePool,
+    event_id: &str,
+    event_tag: &str,
+    ts: i64,
+) -> StorageResult<()> {
+    append(pool, &EventRecord {
+        event_id:        event_id.to_string(),
+        event_tag:       event_tag.to_string(),
+        ts,
+        retention_until: ts + 86_400,
+        detail_json:     None,
+    }).await
 }

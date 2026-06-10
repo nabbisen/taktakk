@@ -1,22 +1,18 @@
-//! Package installation pipeline.
+//! Package installation pipeline (RFC-039/040).
 //!
-//! The pipeline is:
-//! 1. Parse the `.nmp` bytes.
-//! 2. Verify the Ed25519 signature.
-//! 3. Verify each object's SHA-256 hash.
-//! 4. Write objects to the object store.
-//! 5. Record the package in the database (status = Installed).
-//!
-//! Any failure before step 4 causes an immediate quarantine record
-//! without touching the object store.
+//! `install_package()` is a thin `Cursor`-based wrapper for test fixtures.
+//! `install_package_stream()` is the real implementation using the streaming
+//! `NmpStreamReader`.
 
+use std::io::Cursor;
+
+use sha2::{Digest, Sha256};
 use taktakk_core::domain::curriculum::ModuleVersion;
-use taktakk_core::domain::package::{ContentPackage, PackageStatus};
+use taktakk_core::domain::package::{ContentPackage, PackageManifest, PackageStatus};
 use taktakk_core::ports::package_store::ObjectStore;
 use taktakk_security::trust_anchor::TrustAnchor;
 
-use crate::nmp::reader::parse;
-use crate::verify;
+use crate::nmp::stream_reader::install_package_stream;
 
 /// Outcome of a package installation attempt.
 #[derive(Debug)]
@@ -27,10 +23,10 @@ pub enum InstallOutcome {
     Quarantined { reason: String },
 }
 
-/// Install a `.nmp` byte buffer using the supplied object store and trust anchors.
+/// Install a `.nmp` byte buffer.
 ///
-/// `package_id` should be a pre-generated UUID for the DB record.
-/// `now` is the current Unix timestamp in seconds.
+/// Thin wrapper around `install_package_stream` for test fixtures and
+/// backwards-compatible callers that already have the bytes in memory.
 pub fn install_package(
     raw: &[u8],
     package_id: &str,
@@ -38,65 +34,27 @@ pub fn install_package(
     object_store: &dyn ObjectStore,
     now: i64,
 ) -> InstallOutcome {
-    // Parse
-    let pkg = match parse(raw) {
-        Ok(p) => p,
-        Err(e) => return InstallOutcome::Quarantined { reason: e.to_string() },
-    };
+    install_package_stream(Cursor::new(raw), package_id, trust_anchors, object_store, now)
+}
 
-    // Verify signature
-    if let Err(e) = verify::verify_signature(&pkg, trust_anchors) {
-        return InstallOutcome::Quarantined { reason: e.to_string() };
-    }
-
-    // Verify object hashes
-    if let Err(e) = verify::verify_objects(&pkg) {
-        return InstallOutcome::Quarantined { reason: e.to_string() };
-    }
-
-    // Write objects to store
-    for (entry, data) in pkg.manifest.objects.iter().zip(pkg.objects.iter()) {
-        // The store's `put` re-computes the hash and stores under that key.
-        // We verify the returned hash matches the manifest entry.
-        let stored_hash = match object_store.put(data) {
-            Ok(h) => h,
-            Err(e) => {
-                return InstallOutcome::Quarantined {
-                    reason: format!("object store write failed for '{}': {}", entry.path, e),
-                }
-            }
-        };
-        if stored_hash != entry.sha256 {
-            // Shouldn't happen after verify_objects, but be defensive.
-            let _ = object_store.quarantine(&stored_hash, "post-write hash mismatch");
-            return InstallOutcome::Quarantined {
-                reason: format!(
-                    "post-write hash mismatch for '{}': {} != {}",
-                    entry.path, entry.sha256, stored_hash
-                ),
-            };
-        }
-    }
-
-    let version = pkg.manifest.version.clone();
-    let module_id = pkg.manifest.module_id.clone();
-    let manifest_hash = {
-        use sha2::{Digest, Sha256};
-        let mut h = Sha256::new();
-        h.update(&pkg.manifest_bytes);
-        hex::encode(h.finalize())
-    };
-
-    InstallOutcome::Installed {
-        package: ContentPackage {
-            package_id: package_id.to_string(),
-            module_id,
-            version,
-            manifest_hash,
-            status: PackageStatus::Installed,
-            installed_at: Some(now),
-            quarantine_reason: None,
-        },
+/// Build a `ContentPackage` record for a successful install.
+///
+/// Called by `install_package_stream` after all objects are verified and stored.
+pub fn build_content_package(
+    package_id: &str,
+    manifest: &PackageManifest,
+    manifest_bytes: &[u8],
+    now: i64,
+) -> ContentPackage {
+    let manifest_hash = hex::encode(Sha256::digest(manifest_bytes));
+    ContentPackage {
+        package_id: package_id.to_string(),
+        module_id: manifest.module_id.clone(),
+        version: manifest.version.clone(),
+        manifest_hash,
+        status: PackageStatus::Installed,
+        installed_at: Some(now),
+        quarantine_reason: None,
     }
 }
 

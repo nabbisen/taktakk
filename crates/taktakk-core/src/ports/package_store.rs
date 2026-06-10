@@ -22,4 +22,27 @@ pub trait ObjectStore: Send + Sync {
 
     /// Delete an object permanently.
     fn delete(&self, sha256_hex: &str) -> CoreResult<()>;
+
+    // ── Staged install support (RFC-040) ──────────────────────────────────
+
+    /// Write object data to `staging/<install_id>/<hash>`.
+    ///
+    /// Staged objects are not yet part of the live store; they are promoted
+    /// atomically by `commit_staging()` after the DB transaction succeeds.
+    fn stage(&self, install_id: &str, data: &[u8]) -> CoreResult<String>;
+
+    /// Promote all staged objects for `install_id` to the live store.
+    ///
+    /// Called after the DB transaction commits successfully.
+    fn commit_staging(&self, install_id: &str) -> CoreResult<()>;
+
+    /// Delete all staged objects for `install_id` without promoting.
+    ///
+    /// Called when the install fails or is aborted.
+    fn abort_staging(&self, install_id: &str) -> CoreResult<()>;
+
+    /// List all install IDs that have staged objects.
+    ///
+    /// Used by crash recovery to find orphaned staging directories.
+    fn list_staging_ids(&self) -> CoreResult<Vec<String>>;
 }

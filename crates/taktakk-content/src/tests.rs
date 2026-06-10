@@ -42,6 +42,13 @@ impl ObjectStore for FakeStore {
         self.0.lock().unwrap().remove(hash);
         Ok(())
     }
+    // Staging: for FakeStore, staging and live store are the same map.
+    fn stage(&self, _install_id: &str, data: &[u8]) -> CoreResult<String> {
+        self.put(data)
+    }
+    fn commit_staging(&self, _install_id: &str) -> CoreResult<()> { Ok(()) }
+    fn abort_staging(&self, _install_id: &str) -> CoreResult<()> { Ok(()) }
+    fn list_staging_ids(&self) -> CoreResult<Vec<String>> { Ok(vec![]) }
 }
 
 // ── .nmp parse tests ──────────────────────────────────────────────────────────

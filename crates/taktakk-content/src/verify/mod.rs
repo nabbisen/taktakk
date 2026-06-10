@@ -21,8 +21,8 @@ pub fn verify_signature(
 
     let anchor = trust_anchors
         .iter()
-        .find(|a| &a.signing_key_id == signer_id && a.status == TrustAnchorStatus::Trusted)
-        .ok_or_else(|| ContentError::UnknownSigner { signer_id: signer_id.clone() })?;
+        .find(|a| &a.signing_key_id == signer_id && a.status == TrustAnchorStatus::Active)
+        .ok_or_else(|| ContentError::UnknownSigner(signer_id.clone()))?;
 
     let key_bytes: [u8; 32] = anchor
         .public_key_bytes
@@ -60,4 +60,31 @@ pub fn verify_objects(pkg: &ParsedPackage) -> ContentResult<()> {
 pub fn verify_all(pkg: &ParsedPackage, trust_anchors: &[TrustAnchor]) -> ContentResult<()> {
     verify_signature(pkg, trust_anchors)?;
     verify_objects(pkg)
+}
+
+/// Verify a raw Ed25519 signature against manifest bytes and trust anchors.
+///
+/// Used by `NmpStreamReader` which has the raw bytes and signature array
+/// before constructing a `ParsedPackage`.
+pub fn verify_signature_bytes(
+    manifest_bytes: &[u8],
+    signature: &[u8; 64],
+    manifest: &taktakk_core::domain::package::PackageManifest,
+    trust_anchors: &[TrustAnchor],
+) -> ContentResult<()> {
+    use ed25519_dalek::{Signature, Verifier};
+
+    let anchor = trust_anchors
+        .iter()
+        .find(|a| a.signing_key_id == manifest.signer_id && a.is_active())
+        .ok_or_else(|| ContentError::UnknownSigner(manifest.signer_id.clone()))?;
+
+    let verifying_key = anchor
+        .verifying_key()
+        .map_err(|e| ContentError::SignatureVerification(e.to_string()))?;
+
+    let sig = Signature::from_bytes(signature);
+    verifying_key
+        .verify(manifest_bytes, &sig)
+        .map_err(|e| ContentError::SignatureVerification(e.to_string()))
 }

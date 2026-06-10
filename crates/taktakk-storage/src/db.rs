@@ -21,6 +21,7 @@ impl Database {
         let core   = open_pool(base_dir.join("core.sqlite")).await?;
         run_facade_migrations(&facade).await?;
         run_core_migrations(&core).await?;
+        recover_staging_dirs(base_dir);
         Ok(Self { facade, core })
     }
 }
@@ -82,8 +83,13 @@ async fn run_core_migrations(pool: &SqlitePool) -> StorageResult<()> {
             version_patch INTEGER NOT NULL, manifest_hash TEXT NOT NULL,
             status TEXT NOT NULL, installed_at INTEGER, quarantine_reason TEXT)",
         "CREATE TABLE IF NOT EXISTS trust_anchors (
-            signing_key_id TEXT PRIMARY KEY NOT NULL, label TEXT NOT NULL,
-            public_key_bytes BLOB NOT NULL, added_at INTEGER NOT NULL, status TEXT NOT NULL)",
+            signing_key_id   TEXT PRIMARY KEY NOT NULL,
+            public_key_bytes BLOB NOT NULL,
+            scope            TEXT NOT NULL DEFAULT 'content',
+            added_at         INTEGER NOT NULL,
+            status           TEXT NOT NULL,
+            revoked_at       INTEGER
+        )",
         // Curriculum
         "CREATE TABLE IF NOT EXISTS modules (
             module_id TEXT PRIMARY KEY NOT NULL, category_id TEXT NOT NULL,
@@ -140,8 +146,12 @@ async fn run_core_migrations(pool: &SqlitePool) -> StorageResult<()> {
             check_result TEXT NOT NULL, detail TEXT, checked_at INTEGER NOT NULL)",
         // Event log
         "CREATE TABLE IF NOT EXISTS event_log (
-            event_id TEXT PRIMARY KEY NOT NULL, event_tag TEXT NOT NULL,
-            ts INTEGER NOT NULL, detail_json TEXT)",
+            event_id         TEXT PRIMARY KEY NOT NULL,
+            event_tag        TEXT NOT NULL,
+            ts               INTEGER NOT NULL,
+            retention_until  INTEGER NOT NULL,
+            detail_json      TEXT
+        )",
         "CREATE INDEX IF NOT EXISTS event_log_ts ON event_log (ts)",
         // ── Sync & import ─────────────────────────────────────────────────
         "CREATE TABLE IF NOT EXISTS sync_sessions (
@@ -203,4 +213,23 @@ async fn run_core_migrations(pool: &SqlitePool) -> StorageResult<()> {
         return Err(StorageError::Migration(format!("integrity_check failed: {result}")));
     }
     Ok(())
+}
+
+/// On startup, remove any orphaned `staging/<install_id>/` directories
+/// that were left by an interrupted install (RFC-040 crash recovery).
+///
+/// Objects in staging are unverified or partially written. Removing them
+/// is safe — the install will need to be retried from the beginning.
+fn recover_staging_dirs(base_dir: &std::path::Path) {
+    let staging_root = base_dir.join("objects").join("staging");
+    if !staging_root.exists() {
+        return;
+    }
+    if let Ok(entries) = std::fs::read_dir(&staging_root) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
 }

@@ -133,3 +133,51 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   `taktakk-storage/wipe.rs`. Tracked as next maintenance task.
 - `sha2 0.10.9 → 0.11.0`: may require `argon2` version bump to maintain
   `generic-array` compat. Tracked with `rand` upgrade sprint.
+
+---
+
+## [0.9.1] — Remediation Sprint (RFC-037–049)
+
+### Fixed (RFC-049)
+- Removed 5 stray `.rs` files at `crates/taktakk-core/` root (`domain.rs`,
+  `ports.rs`, `use_cases.rs`, `tests.rs`, `error.rs`). These were dead code
+  shadowed by the `src/` tree.
+- Replaced `rfcs/README.md` (contained sui-id project content) with the
+  correct taktakk RFC index (RFC-001–049).
+- Bumped workspace version from `0.9.0` → `0.9.1` for consistency with
+  release tarball name.
+
+### Added (RFC-042)
+- `rust-toolchain.toml` at workspace root (pins Rust 1.91, includes
+  rustfmt and clippy components).
+- `.github/workflows/ci.yml` with fmt, clippy, and locked-test CI pipeline.
+
+### Changed (RFC-047)
+- `TrustAnchor.label` field removed. On-device DB stores only
+  `signing_key_id`, `public_key_bytes`, `scope`, `status`, and timestamps.
+  Organisation names must not be stored on devices.
+
+### Changed (RFC-041)
+- `event_log::append()` is now private.
+- New public API: `log_event(pool, EventBucket, Option<SafeEventDetail>, now)`.
+- `SafeEventDetail` has no string fields — error codes, counts, and elapsed
+  milliseconds only.
+- `retention_until` column added to `event_log`; set mandatory on insert.
+
+### Changed (RFC-039)
+- `NmpStreamReader<R: Read>` replaces the full-load `parse()` path for the
+  install pipeline. Manifest parsed eagerly (≤ 16 KiB); objects streamed
+  one at a time through SHA-256 verifier.
+- `install_package_stream()` public; `install_package(raw: &[u8])` kept as
+  thin `Cursor` wrapper for test fixtures.
+- `open_package_stream()` replaces `read_package_file()` in `import.rs`.
+- Size limits enforced: manifest 16 KiB, object 20 MiB, package 50 MiB.
+- Fixed `NmpWriter::build()` bug: `add_object()` now preserves `ObjectType`;
+  previously all objects were re-serialised as `ObjectType::Json`.
+
+### Changed (RFC-040)
+- `install_package_transactional()` implements staging → signature verify →
+  per-object stream+hash → DB transaction → object promotion.
+- `staging/<install_id>/` temp directory cleaned on abort.
+- `recover_incomplete_installs()` called by `Database::open()`.
+- Quarantine records now persisted to `content_packages` table.

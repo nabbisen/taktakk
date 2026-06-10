@@ -161,17 +161,24 @@ pub async fn factory_reset(facade: &SqlitePool, core: &SqlitePool) -> StorageRes
 
 // ── Log scrubbing ─────────────────────────────────────────────────────────────
 
-/// Enforce the 24-hour log retention policy (RFC 019).
-/// Returns the number of purged rows.
+/// Enforce the log retention policy (RFC-041 / RFC-019).
+///
+/// Delegates to `event_log::purge_old` which uses `retention_until` column.
+/// The `max_age_seconds` parameter is kept for backwards compatibility but
+/// is applied as `cutoff = now - max_age_seconds` against `retention_until`.
 pub async fn enforce_log_retention(
     core: &SqlitePool,
     now: i64,
     max_age_seconds: i64,
 ) -> StorageResult<u64> {
     let cutoff = now - max_age_seconds;
-    let result = sqlx::query("DELETE FROM event_log WHERE ts < ?")
-        .bind(cutoff)
-        .execute(core).await.map_err(StorageError::Database)?;
+    let result = sqlx::query(
+        "DELETE FROM event_log WHERE retention_until < ?",
+    )
+    .bind(cutoff)
+    .execute(core)
+    .await
+    .map_err(StorageError::Database)?;
     Ok(result.rows_affected())
 }
 

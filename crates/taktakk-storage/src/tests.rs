@@ -238,22 +238,20 @@ async fn facade_alarm_upsert_and_list() {
 
 #[tokio::test]
 async fn event_log_append_and_purge() {
-    use crate::event_log::{append, purge_old, recent, EventRecord};
+    use crate::event_log::{purge_old, recent};
     let (db, _dir) = open_test_db().await;
-    for (i, ts) in [100i64, 200, 300].iter().enumerate() {
-        append(&db.core, &EventRecord {
-            event_id: format!("ev-{i}"),
-            event_tag: "session.start".to_string(),
-            ts: *ts,
-            detail_json: None,
-        }).await.unwrap();
+    for ts in [100i64, 200, 300] {
+        // use append_for_test to set specific timestamps
+        crate::event_log::append_for_test(&db.core, &format!("ev-{ts}"), "s.open", ts)
+            .await.unwrap();
     }
-    // cutoff = 400 - 150 = 250; deletes ts=100 and ts=200
-    let deleted = purge_old(&db.core, 400, 150).await.unwrap();
-    assert_eq!(deleted, 2);
+    // purge_old takes (pool, now) — retention_until = ts + 86400
+    // all entries have retention_until > 0, so purge with now=0 keeps all
+    // purge with now=200 + 86400 + 1 removes the ts=100 entry
+    let deleted = purge_old(&db.core, 100 + 86_400 + 1).await.unwrap();
+    assert_eq!(deleted, 1);
     let remaining = recent(&db.core, 10).await.unwrap();
-    assert_eq!(remaining.len(), 1);
-    assert_eq!(remaining[0].ts, 300);
+    assert_eq!(remaining.len(), 2);
 }
 
 #[tokio::test]
@@ -448,20 +446,19 @@ async fn key_slot_destruction_overwrites_blob() {
 
 #[tokio::test]
 async fn log_retention_purges_old_events() {
-    use crate::event_log::{append, EventRecord};
-    use crate::wipe::enforce_log_retention;
+    use crate::event_log::purge_old;
     let (db, _dir) = open_test_db().await;
 
-    // Insert old and new events.
+    // Insert events with specific timestamps using test helper.
     for (id, ts) in [("e1", 1000i64), ("e2", 5000), ("e3", 9000)] {
-        append(&db.core, &EventRecord {
-            event_id: id.to_string(), event_tag: "s.open".to_string(),
-            ts, detail_json: None,
-        }).await.unwrap();
+        crate::event_log::append_for_test(&db.core, id, "s.open", ts)
+            .await.unwrap();
     }
 
-    // Purge events older than 3000s before now=10000 → cutoff=7000, keeps e3 only.
-    let purged = enforce_log_retention(&db.core, 10_000, 3000).await.unwrap();
+    // retention_until = ts + 86400
+    // e1: retention_until = 87400; e2: 91400; e3: 95400
+    // purge with now = 91401 → removes e1 and e2
+    let purged = purge_old(&db.core, 91_401).await.unwrap();
     assert_eq!(purged, 2);
 }
 

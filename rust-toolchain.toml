@@ -1,0 +1,8 @@
+[toolchain]
+channel    = "1.91"
+components = ["rustfmt", "clippy"]
+targets    = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-linux-android",
+    "wasm32-unknown-unknown",
+]

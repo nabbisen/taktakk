@@ -18,66 +18,79 @@ without touching the internet.
 
 ---
 
-## Why taktakk?
+## Why taktakk — and when to use it
 
-- **No internet required.** Learn fully offline; sync peer-to-peer via
-  Bluetooth, Wi-Fi Direct, or SD card.
-- **Plausible deniability.** Looks like a clock. No visible product name
-  before unlock. Panic wipe destroys all data instantly.
-- **Runs on old hardware.** Targets 5–10-year-old Android phones with
-  1 GB RAM and slow flash storage.
-- **Accessible.** High contrast, large touch targets, audio narration,
-  RTL layout for Arabic/Farsi/Urdu, pictogram-first navigation.
+Use taktakk when learners need access to knowledge but:
+
+- Internet infrastructure is absent, unreliable, or surveilled.
+- Power is intermittent (solar, generator, none).
+- Devices are old (1 GB RAM, 5–10-year-old Android).
+- Carrying an openly educational app could attract unwanted attention.
+- Content must travel physically between communities.
+
+Typical deployments: humanitarian field operations, refugee education
+programmes, community health worker training, digital literacy in
+low-connectivity regions.
 
 ---
 
-## Quick Start (developers)
+## Quick Start
 
 ```bash
-# Requires Rust 1.91+
+# Requires Rust 1.91+ and cargo-1.91
 cargo build
 cargo test
 
-# Run the Linux demo binary (M1–M6 integration)
+# Run the end-to-end demo (unlock → install → lesson → wipe)
 cargo run -p taktakk-linux
 ```
 
-See [docs/developers/architecture.md](docs/developers/architecture.md)
-for workspace layout and crate responsibilities.
+Import a sample content package from Rust:
+
+```rust
+use taktakk_content::{
+    install::install_package,
+    samples::build_shield_water_package,
+    fixtures::test_trust_anchor,
+};
+
+let nmp     = build_shield_water_package()?;
+let outcome = install_package(&nmp, "pkg-001", &[test_trust_anchor()], &store, now);
+```
 
 ---
 
-## Features
+## Design Notes
 
-| Feature | Status |
-|---|---|
-| Clock facade + stealth unlock | ✅ M1 |
-| Alarm, stopwatch, timer | ✅ M1 |
-| Duress trigger → instant wipe | ✅ M1/M5 |
-| SQLite 3-layer storage | ✅ M2 |
-| `.nmp` Ed25519-signed packages | ✅ M3 |
-| Shield/Spear dashboard | ✅ M4 |
-| Lesson runner + exercise drills | ✅ M4 |
-| i18n (en/ar/sw) + RTL | ✅ M4 |
-| State/hard/factory wipe | ✅ M5 |
-| Zero-telemetry log policy | ✅ M5 |
-| SD card / local import | ✅ M6 |
-| Chunk-based sync inventory | ✅ M6 |
-| Permission delay model | ✅ M6 |
-| Performance budget model | ✅ M7 |
-| Accessibility audit (ABDD) | ✅ M7 |
-| Security review checklist | ✅ M7 |
+**Clock facade over a dedicated lock screen.**
+A clock is consulted briefly in any context. No product name, icon hint,
+or permission request appears until the user performs the unlock gesture.
+A separate duress code silently wipes everything and returns to the clock.
 
-> **⚠ Security-sensitive software.** Review the
-> [threat model](docs/security-reviewers/threat-model.md) before deployment.
+**Crypto erasure over slow deletion.**
+The wipe path overwrites cryptographic key slots with seven passes of random
+bytes before touching any file. Without the key, ciphertext is computationally
+unrecoverable — even if deletion is interrupted by a power cut.
+
+**Port-based architecture.**
+`taktakk-core` contains only domain types, use cases, and trait ports. It
+has no database, network, or crypto I/O of its own. This keeps all business
+logic independently testable and straightforward to port to new platforms.
+
+**Zero telemetry by design.**
+The only log is a 24-hour rolling event log using ten approved anonymous
+tag buckets. It contains no module names, user identifiers, or content
+details. No analytics, crash reporters, or update pings exist.
 
 ---
 
 ## For more detail
 
-See the [full documentation](docs/README.md) and the following key chapters:
+See the [full documentation](docs/src/SUMMARY.md):
 
-- [Architecture](docs/developers/architecture.md)
-- [Threat model](docs/security-reviewers/threat-model.md)
-- [Field operator guide](docs/field-operators/seed-distribution.md)
-- [Content authoring guide](docs/content-authors/module-authoring-guide.md)
+- [What is taktakk?](docs/src/getting-started/features.md)
+- [Tutorial](docs/src/getting-started/tutorial.md)
+- [API Reference](docs/src/guide/api-reference.md)
+- [Design Philosophy](docs/src/contributing/philosophy.md)
+- [Architecture](docs/src/contributing/architecture.md)
+- [Local Development](docs/src/contributing/local-development.md)

@@ -1,0 +1,18 @@
+[book]
+title       = "taktakk"
+description = "Offline learning for survival, dignity, and self-reliance"
+authors     = ["nabbisen"]
+language    = "en"
+src         = "src"
+
+[output.html]
+theme             = "coal"
+default-theme     = "coal"
+preferred-dark-theme = "coal"
+git-repository-url = "https://github.com/nabbisen/taktakk"
+edit-url-template = "https://github.com/nabbisen/taktakk/edit/main/docs/src/{path}"
+no-section-label  = false
+
+[output.html.fold]
+enable   = true
+level    = 1

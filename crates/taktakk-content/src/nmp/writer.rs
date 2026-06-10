@@ -9,7 +9,7 @@ use super::error::{ContentError, ContentResult};
 /// Builder for creating a signed `.nmp` package.
 pub struct NmpWriter {
     manifest: PackageManifest,
-    objects: Vec<(String, Vec<u8>)>, // (path, data)
+    objects: Vec<(String, Vec<u8>, ObjectType)>, // (path, data, type)
 }
 
 impl NmpWriter {
@@ -18,17 +18,17 @@ impl NmpWriter {
     }
 
     /// Add a named object. The SHA-256 hash is computed automatically and
-    /// written into `manifest.objects`.
+    /// written into `manifest.objects`. The `object_type` is preserved.
     pub fn add_object(&mut self, path: impl Into<String>, data: Vec<u8>, object_type: ObjectType) {
         let path = path.into();
         let sha256 = hex::encode(Sha256::digest(&data));
         self.manifest.objects.push(ObjectEntry {
             path: path.clone(),
             sha256,
-            object_type,
+            object_type: object_type.clone(),
             required: true,
         });
-        self.objects.push((path, data));
+        self.objects.push((path, data, object_type));
     }
 
     /// Serialise the manifest to JSON and return the bytes.
@@ -45,14 +45,15 @@ impl NmpWriter {
     where
         F: Fn(&[u8]) -> [u8; 64],
     {
-        // Re-compute all object hashes to ensure consistency.
+        // Re-compute all object hashes to ensure consistency,
+        // preserving the object_type set by add_object().
         self.manifest.objects.clear();
-        for (path, data) in &self.objects {
+        for (path, data, object_type) in &self.objects {
             let sha256 = hex::encode(Sha256::digest(data));
             self.manifest.objects.push(ObjectEntry {
                 path: path.clone(),
                 sha256,
-                object_type: ObjectType::Json,
+                object_type: object_type.clone(),
                 required: true,
             });
         }
@@ -80,7 +81,7 @@ impl NmpWriter {
         buf.extend_from_slice(&obj_count.to_be_bytes());
 
         // Objects
-        for (_, data) in &self.objects {
+        for (_, data, _) in &self.objects {
             let dlen = data.len() as u32;
             buf.extend_from_slice(&dlen.to_be_bytes());
             buf.extend_from_slice(data);

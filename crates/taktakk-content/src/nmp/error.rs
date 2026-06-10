@@ -7,6 +7,10 @@ pub enum ContentError {
     #[error("invalid magic bytes — not a .nmp package")]
     BadMagic,
 
+    // Alias for BadMagic used by stream_reader
+    #[error("invalid magic bytes — not a .nmp package")]
+    InvalidMagic,
+
     #[error("unsupported format version: {0}")]
     UnsupportedVersion(u8),
 
@@ -16,11 +20,17 @@ pub enum ContentError {
     #[error("manifest JSON parse error: {0}")]
     ManifestParse(String),
 
+    #[error("package parse error: {0}")]
+    Parse(String),
+
+    #[error("signature verification failed: {0}")]
+    SignatureVerification(String),
+
     #[error("signature verification failed")]
     SignatureFailed,
 
-    #[error("signer '{signer_id}' not found in trust anchors")]
-    UnknownSigner { signer_id: String },
+    #[error("signer '{0}' not found in trust anchors")]
+    UnknownSigner(String),
 
     #[error("object hash mismatch for '{path}': expected {expected}, got {actual}")]
     HashMismatch { path: String, expected: String, actual: String },

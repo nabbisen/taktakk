@@ -63,6 +63,28 @@ impl<S: ObjectStore + Send + Sync> ObjectStore for FaultInjectingStore<S> {
     fn delete(&self, hash: &str) -> CoreResult<()> {
         self.inner.delete(hash)
     }
+
+    fn stage(&self, install_id: &str, data: &[u8]) -> CoreResult<String> {
+        let count = self.write_count.fetch_add(1, Ordering::SeqCst);
+        if count >= self.fail_after {
+            return Err(CoreError::Storage(format!(
+                "simulated write failure after {} writes", self.fail_after
+            )));
+        }
+        self.inner.stage(install_id, data)
+    }
+
+    fn commit_staging(&self, install_id: &str) -> CoreResult<()> {
+        self.inner.commit_staging(install_id)
+    }
+
+    fn abort_staging(&self, install_id: &str) -> CoreResult<()> {
+        self.inner.abort_staging(install_id)
+    }
+
+    fn list_staging_ids(&self) -> CoreResult<Vec<String>> {
+        self.inner.list_staging_ids()
+    }
 }
 
 // ── Corrupt package generator ─────────────────────────────────────────────────

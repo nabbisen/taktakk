@@ -125,16 +125,30 @@ fn task_field_failure_tests() {
 fn task_docs_check() {
     println!("=== docs-check ===");
     let required = [
-        "docs/README.md",
-        "docs/developers/architecture.md",
-        "docs/security-reviewers/threat-model.md",
-        "docs/security-reviewers/audit-checklist.md",
-        "docs/security-reviewers/panic-wipe.md",
-        "docs/field-operators/seed-distribution.md",
-        "docs/field-operators/pilot-checklist.md",
-        "docs/content-authors/module-authoring-guide.md",
-        "docs/release/reproducible-builds.md",
-        "docs/release/release-checklist.md",
+        // mdBook structure
+        "docs/book.toml",
+        "docs/src/SUMMARY.md",
+        "docs/src/introduction.md",
+        // Persona 1: first-time users
+        "docs/src/getting-started/README.md",
+        "docs/src/getting-started/features.md",
+        "docs/src/getting-started/tutorial.md",
+        "docs/src/getting-started/guidelines.md",
+        "docs/src/getting-started/faq.md",
+        // Persona 2: experienced users
+        "docs/src/guide/README.md",
+        "docs/src/guide/api-reference.md",
+        "docs/src/guide/content-packages.md",
+        "docs/src/guide/module-authoring.md",
+        "docs/src/guide/security-audit.md",
+        "docs/src/guide/panic-wipe.md",
+        // Persona 3: maintainers / contributors
+        "docs/src/contributing/README.md",
+        "docs/src/contributing/philosophy.md",
+        "docs/src/contributing/architecture.md",
+        "docs/src/contributing/local-development.md",
+        "docs/src/contributing/reproducible-builds.md",
+        "docs/src/contributing/release.md",
     ];
     let mut missing = 0;
     for path in &required {

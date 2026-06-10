@@ -33,7 +33,7 @@ impl SignatureVerifier for Ed25519Verifier {
         let anchor = self
             .anchors
             .iter()
-            .find(|a| a.signing_key_id == signer_id && a.status == TrustAnchorStatus::Trusted)
+            .find(|a| a.signing_key_id == signer_id && a.status == TrustAnchorStatus::Active)
             .ok_or_else(|| CoreError::SignatureVerificationFailed)?;
 
         let vk = anchor

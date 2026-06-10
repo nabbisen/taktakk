@@ -89,4 +89,68 @@ impl ObjectStore for FsObjectStore {
         }
         Ok(())
     }
+
+    // ── Staging support (RFC-040) ─────────────────────────────────────────
+
+    fn stage(&self, install_id: &str, data: &[u8]) -> CoreResult<String> {
+        use sha2::{Digest, Sha256};
+        let hash = hex::encode(Sha256::digest(data));
+        let dir = self.base.join("staging").join(install_id);
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| CoreError::Storage(e.to_string()))?;
+        let path = dir.join(&hash);
+        let tmp  = dir.join(format!("{hash}.tmp"));
+        std::fs::write(&tmp, data)
+            .map_err(|e| CoreError::Storage(e.to_string()))?;
+        std::fs::rename(&tmp, &path)
+            .map_err(|e| CoreError::Storage(e.to_string()))?;
+        Ok(hash)
+    }
+
+    fn commit_staging(&self, install_id: &str) -> CoreResult<()> {
+        let staging_dir = self.base.join("staging").join(install_id);
+        if !staging_dir.exists() {
+            return Ok(());
+        }
+        let entries = std::fs::read_dir(&staging_dir)
+            .map_err(|e| CoreError::Storage(e.to_string()))?;
+        for entry in entries.flatten() {
+            let hash = entry.file_name().to_string_lossy().into_owned();
+            if hash.ends_with(".tmp") { continue; }
+            let dst = self.object_path(&hash);
+            if let Some(p) = dst.parent() {
+                std::fs::create_dir_all(p)
+                    .map_err(|e| CoreError::Storage(e.to_string()))?;
+            }
+            if !dst.exists() {
+                std::fs::rename(entry.path(), &dst)
+                    .map_err(|e| CoreError::Storage(e.to_string()))?;
+            }
+        }
+        let _ = std::fs::remove_dir_all(&staging_dir);
+        Ok(())
+    }
+
+    fn abort_staging(&self, install_id: &str) -> CoreResult<()> {
+        let staging_dir = self.base.join("staging").join(install_id);
+        if staging_dir.exists() {
+            std::fs::remove_dir_all(&staging_dir)
+                .map_err(|e| CoreError::Storage(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    fn list_staging_ids(&self) -> CoreResult<Vec<String>> {
+        let staging_root = self.base.join("staging");
+        if !staging_root.exists() {
+            return Ok(vec![]);
+        }
+        let ids = std::fs::read_dir(&staging_root)
+            .map_err(|e| CoreError::Storage(e.to_string()))?
+            .flatten()
+            .filter(|e| e.path().is_dir())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        Ok(ids)
+    }
 }

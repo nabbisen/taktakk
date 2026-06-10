@@ -18,6 +18,7 @@
 pub mod error;
 pub mod manifest;
 pub mod reader;
+pub mod stream_reader;
 pub mod writer;
 
 pub use error::{ContentError, ContentResult};

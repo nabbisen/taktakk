@@ -33,10 +33,9 @@ pub const TEST_SIGNER_ID: &str = "test-signer-001";
 pub fn test_trust_anchor() -> TrustAnchor {
     TrustAnchor {
         signing_key_id: TEST_SIGNER_ID.to_string(),
-        label: "Test Signer (not for production)".to_string(),
         public_key_bytes: test_verifying_key().to_bytes().to_vec(),
         added_at: 0,
-        status: TrustAnchorStatus::Trusted,
+        status: TrustAnchorStatus::Active,
     }
 }
 
