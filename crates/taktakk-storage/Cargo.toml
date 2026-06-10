@@ -17,3 +17,6 @@ hex.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 taktakk-core = { path = "../taktakk-core" }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }

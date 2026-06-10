@@ -110,6 +110,9 @@ async fn run_facade_migrations(pool: &SqlitePool) -> StorageResult<()> {
 /// Run migrations for `core.sqlite`.
 /// Protected by encryption at rest; may use domain-specific names.
 async fn run_core_migrations(pool: &SqlitePool) -> StorageResult<()> {
+    // Use explicit transactions so power loss mid-migration leaves DB intact.
+    let mut tx = pool.begin().await.map_err(StorageError::Database)?;
+
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS local_profiles (
@@ -132,6 +135,15 @@ async fn run_core_migrations(pool: &SqlitePool) -> StorageResult<()> {
             quarantine_reason TEXT
         );
 
+        -- Trust anchors: Ed25519 public keys of authorised content publishers.
+        CREATE TABLE IF NOT EXISTS trust_anchors (
+            signing_key_id    TEXT PRIMARY KEY NOT NULL,
+            label             TEXT NOT NULL,
+            public_key_bytes  BLOB NOT NULL,
+            added_at          INTEGER NOT NULL,
+            status            TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS resume_state (
             profile_id                 TEXT NOT NULL,
             lesson_id                  TEXT NOT NULL,
@@ -151,6 +163,56 @@ async fn run_core_migrations(pool: &SqlitePool) -> StorageResult<()> {
             PRIMARY KEY (profile_id, lesson_id)
         );
 
+        CREATE TABLE IF NOT EXISTS learning_sessions (
+            session_id   TEXT PRIMARY KEY NOT NULL,
+            profile_id   TEXT NOT NULL,
+            started_at   INTEGER NOT NULL,
+            ended_at     INTEGER,
+            FOREIGN KEY (profile_id) REFERENCES local_profiles(profile_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS exercise_attempts (
+            attempt_id     TEXT PRIMARY KEY NOT NULL,
+            profile_id     TEXT NOT NULL,
+            step_id        TEXT NOT NULL,
+            correct        INTEGER NOT NULL,
+            attempt_number INTEGER NOT NULL,
+            attempted_at   INTEGER NOT NULL,
+            FOREIGN KEY (profile_id) REFERENCES local_profiles(profile_id)
+        );
+
+        -- Content-addressed object metadata (actual bytes live in object_store/).
+        CREATE TABLE IF NOT EXISTS content_objects (
+            object_hash       TEXT PRIMARY KEY NOT NULL,
+            object_type       TEXT NOT NULL,
+            storage_uri       TEXT NOT NULL,
+            byte_size         INTEGER NOT NULL,
+            compression       TEXT,
+            created_at        INTEGER NOT NULL,
+            last_accessed_at  INTEGER
+        );
+
+        -- Package ↔ Object mapping.
+        CREATE TABLE IF NOT EXISTS package_objects (
+            package_id    TEXT NOT NULL,
+            object_hash   TEXT NOT NULL,
+            role          TEXT NOT NULL,
+            required      INTEGER NOT NULL DEFAULT 1,
+            sort_order    INTEGER,
+            PRIMARY KEY (package_id, object_hash),
+            FOREIGN KEY (package_id) REFERENCES content_packages(package_id),
+            FOREIGN KEY (object_hash) REFERENCES content_objects(object_hash)
+        );
+
+        -- Integrity check log for quarantined objects.
+        CREATE TABLE IF NOT EXISTS integrity_checks (
+            check_id     TEXT PRIMARY KEY NOT NULL,
+            object_hash  TEXT NOT NULL,
+            check_result TEXT NOT NULL,
+            detail       TEXT,
+            checked_at   INTEGER NOT NULL
+        );
+
         -- Short-retention event log: no module names, only generic IDs.
         CREATE TABLE IF NOT EXISTS event_log (
             event_id    TEXT PRIMARY KEY NOT NULL,
@@ -160,11 +222,27 @@ async fn run_core_migrations(pool: &SqlitePool) -> StorageResult<()> {
         );
 
         CREATE INDEX IF NOT EXISTS event_log_ts ON event_log (ts);
+        CREATE INDEX IF NOT EXISTS learning_sessions_profile ON learning_sessions (profile_id);
+        CREATE INDEX IF NOT EXISTS exercise_attempts_profile ON exercise_attempts (profile_id, step_id);
         "#,
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .map_err(StorageError::Database)?;
+
+    tx.commit().await.map_err(StorageError::Database)?;
+
+    // Post-migration integrity check (mandatory per RFC 006).
+    let result: (String,) = sqlx::query_as("PRAGMA integrity_check")
+        .fetch_one(pool)
+        .await
+        .map_err(StorageError::Database)?;
+    if result.0 != "ok" {
+        return Err(StorageError::Migration(format!(
+            "integrity_check failed: {}",
+            result.0
+        )));
+    }
 
     Ok(())
 }

@@ -54,3 +54,17 @@ pub fn execute_panic_wipe(
         scope,
     })
 }
+
+/// State wipe: remove all learning progress and session data.
+/// Keys are *not* destroyed; the database structure remains intact.
+pub fn wipe_state_only() -> WipeStateRequest {
+    WipeStateRequest { include_sessions: true, include_progress: true }
+}
+
+/// A request to erase progress data without destroying keys.
+#[derive(Debug, Clone)]
+pub struct WipeStateRequest {
+    pub include_sessions: bool,
+    pub include_progress: bool,
+}
+
