@@ -114,3 +114,83 @@ fn t_returns_key_when_missing() {
     let tag = LocaleTag::new("en");
     assert_eq!(b.t(&tag, "missing_key"), "missing_key");
 }
+
+// ── Navigation direction tests ────────────────────────────────────────────────
+
+use crate::navigation::{ArrowDir, NavigationArrows, icon_mirror_policy, IconMirrorPolicy};
+
+#[test]
+fn ltr_forward_is_right() {
+    let nav = NavigationArrows::for_direction(TextDirection::Ltr);
+    assert_eq!(nav.forward, ArrowDir::Right);
+    assert_eq!(nav.back,    ArrowDir::Left);
+}
+
+#[test]
+fn rtl_forward_is_left() {
+    let nav = NavigationArrows::for_direction(TextDirection::Rtl);
+    assert_eq!(nav.forward, ArrowDir::Left);
+    assert_eq!(nav.back,    ArrowDir::Right);
+}
+
+#[test]
+fn arrow_icon_mirrors_in_rtl() {
+    assert_eq!(icon_mirror_policy("arrow-back"),    IconMirrorPolicy::Mirror);
+    assert_eq!(icon_mirror_policy("arrow-forward"), IconMirrorPolicy::Mirror);
+}
+
+#[test]
+fn safety_icon_never_mirrors() {
+    assert_eq!(icon_mirror_policy("emergency-exit"), IconMirrorPolicy::NeverMirror);
+    assert_eq!(icon_mirror_policy("water-drop"),     IconMirrorPolicy::NeverMirror);
+}
+
+// ── Fixture bundle tests ──────────────────────────────────────────────────────
+
+use crate::fixtures::fixture_bundle;
+
+#[test]
+fn fixture_bundle_english_nav_keys() {
+    let b = fixture_bundle();
+    let en = LocaleTag::new("en");
+    assert_eq!(b.t(&en, "nav.back"),    "Back");
+    assert_eq!(b.t(&en, "nav.next"),    "Next");
+    assert_eq!(b.t(&en, "shield.title"), "Shield");
+}
+
+#[test]
+fn fixture_bundle_arabic_has_rtl_direction() {
+    let ar = LocaleTag::new("ar");
+    assert_eq!(ar.direction(), TextDirection::Rtl);
+}
+
+#[test]
+fn fixture_bundle_arabic_welcome() {
+    let b = fixture_bundle();
+    let ar = LocaleTag::new("ar");
+    let val = b.get(&ar, "welcome").expect("Arabic welcome should exist");
+    assert!(!val.is_empty());
+}
+
+#[test]
+fn fixture_bundle_swahili_is_ltr() {
+    let sw = LocaleTag::new("sw");
+    assert_eq!(sw.direction(), TextDirection::Ltr);
+}
+
+#[test]
+fn fixture_bundle_fallback_from_ar_eg_to_ar() {
+    let b = fixture_bundle();
+    let ar_eg = LocaleTag::new("ar-EG");
+    // ar-EG has no specific entry; should fall through to ar
+    let val = b.get(&ar_eg, "nav.back");
+    assert!(val.is_some());
+}
+
+#[test]
+fn fixture_bundle_fallback_to_english() {
+    let b = fixture_bundle();
+    // Swahili has no "settings.contrast" key; falls back to English
+    let sw = LocaleTag::new("sw");
+    assert_eq!(b.get(&sw, "settings.contrast"), Some("High Contrast"));
+}

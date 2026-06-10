@@ -270,3 +270,60 @@ async fn wipe_progress_clears_resume_state() {
     wipe_resume_state(&db.core).await.unwrap();
     assert!(get_resume_state(&db.core, "p1", "l1").await.unwrap().is_none());
 }
+
+// ── Curriculum repository ─────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn curriculum_module_upsert_and_list() {
+    use taktakk_core::domain::curriculum::{Module, ModuleStatus, ModuleVersion};
+    use crate::repo::curriculum::{upsert_module, list_modules};
+    let (db, _dir) = open_test_db().await;
+
+    let m = Module {
+        module_id: "shield-water".to_string(),
+        category_id: "shield-hygiene".to_string(),
+        title_key: "shield.water.title".to_string(),
+        description_key: "shield.water.desc".to_string(),
+        version: ModuleVersion::new(1, 0, 0),
+        status: ModuleStatus::Available,
+        estimated_minutes: Some(15),
+    };
+    upsert_module(&db.core, &m).await.unwrap();
+    let list = list_modules(&db.core).await.unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].module_id, "shield-water");
+    assert_eq!(list[0].estimated_minutes, Some(15));
+}
+
+#[tokio::test]
+async fn curriculum_lesson_upsert_and_list() {
+    use taktakk_core::domain::curriculum::{Lesson, Module, ModuleStatus, ModuleVersion};
+    use crate::repo::curriculum::{upsert_module, upsert_lesson, list_lessons};
+    let (db, _dir) = open_test_db().await;
+
+    let m = Module {
+        module_id: "spear-math".to_string(),
+        category_id: "spear-logic".to_string(),
+        title_key: "t".to_string(),
+        description_key: "d".to_string(),
+        version: ModuleVersion::new(1, 0, 0),
+        status: ModuleStatus::Available,
+        estimated_minutes: None,
+    };
+    upsert_module(&db.core, &m).await.unwrap();
+
+    for i in 0u32..3 {
+        upsert_lesson(&db.core, &Lesson {
+            lesson_id: format!("lesson-{i:02}"),
+            module_id: "spear-math".to_string(),
+            title_key: format!("spear.math.lesson{i}"),
+            sort_order: i,
+            step_count: 5,
+        }).await.unwrap();
+    }
+
+    let lessons = list_lessons(&db.core, "spear-math").await.unwrap();
+    assert_eq!(lessons.len(), 3);
+    assert_eq!(lessons[0].sort_order, 0);
+    assert_eq!(lessons[2].sort_order, 2);
+}

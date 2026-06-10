@@ -7,4 +7,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
 taktakk-core = { path = "../taktakk-core" }
+taktakk-i18n  = { path = "../taktakk-i18n" }
