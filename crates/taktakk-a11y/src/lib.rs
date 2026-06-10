@@ -3,6 +3,7 @@
 //! Provides the settings model that drives ABDD (Accessible by Design)
 //! behaviour: high contrast, large text, reduced motion, audio-first, RTL.
 
+pub mod audit;
 pub mod settings;
 
 #[cfg(test)]

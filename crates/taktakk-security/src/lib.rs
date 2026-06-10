@@ -9,6 +9,7 @@ pub mod hash;
 pub mod key_slot;
 pub mod trust_anchor;
 pub mod verifier;
+pub mod audit;
 pub mod wipe;
 
 #[cfg(test)]

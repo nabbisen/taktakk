@@ -155,3 +155,68 @@ fn wipe_idempotent_called_twice() {
     let count = overwrite_all_keys(&mut slots);
     assert_eq!(count, 0);
 }
+
+// ── Security audit (M7) ───────────────────────────────────────────────────────
+
+use crate::audit::{run_security_audit, SecurityCategory};
+
+#[test]
+fn all_security_checks_pass() {
+    let report = run_security_audit();
+    let failures: Vec<_> = report.checks.iter().filter(|c| !c.passed).collect();
+    for f in &failures {
+        eprintln!("FAILED: {} — {:?}", f.id, f.detail);
+    }
+    assert!(report.all_passed(), "security audit: {}", report.summary());
+}
+
+#[test]
+fn no_telemetry_check_passes() {
+    let report = run_security_audit();
+    let check = report.checks.iter().find(|c| c.id == "no_telemetry_by_default").unwrap();
+    assert!(check.passed);
+}
+
+#[test]
+fn key_destruction_order_verified() {
+    let report = run_security_audit();
+    let check = report.checks.iter()
+        .find(|c| c.id == "key_destruction_precedes_file_deletion").unwrap();
+    assert!(check.passed);
+}
+
+#[test]
+fn facade_neutral_naming_verified() {
+    let report = run_security_audit();
+    let check = report.checks.iter()
+        .find(|c| c.id == "facade_table_names_are_neutral").unwrap();
+    assert!(check.passed);
+}
+
+#[test]
+fn quarantine_on_failure_verified() {
+    let report = run_security_audit();
+    let check = report.checks.iter()
+        .find(|c| c.id == "quarantine_on_any_verification_failure").unwrap();
+    assert!(check.passed);
+}
+
+#[test]
+fn security_summary_format() {
+    let report = run_security_audit();
+    assert!(report.summary().contains("checks passed"));
+}
+
+#[test]
+fn failures_by_category_returns_correct_subset() {
+    let report = run_security_audit();
+    // For a passing audit, each category should have 0 failures.
+    for cat in &[
+        SecurityCategory::Privacy,
+        SecurityCategory::Cryptography,
+        SecurityCategory::FacadeSafety,
+    ] {
+        let failures = report.failures_by_category(cat);
+        assert!(failures.is_empty(), "unexpected failure in {:?}: {:?}", cat, failures);
+    }
+}

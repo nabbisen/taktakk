@@ -261,3 +261,62 @@ fn state_wipe_scope_variants_distinct() {
     assert_ne!(StateWipeScope::ProgressOnly, StateWipeScope::ProfilesAndProgress);
     assert_ne!(StateWipeScope::ProfilesAndProgress, StateWipeScope::AllUserData);
 }
+
+// ── Field health check (M7) ───────────────────────────────────────────────────
+
+use crate::use_cases::field_check::{
+    run_static_checks, TimingMeasurement,
+    BUDGET_RESUME_WRITE_MS, LIMIT_RESUME_WRITE_MS,
+    BUDGET_STEP_TRANSITION_MS, LIMIT_STEP_TRANSITION_MS,
+    MAX_PACKAGE_STREAM_BYTES,
+};
+
+#[test]
+fn static_health_checks_all_pass() {
+    let report = run_static_checks();
+    assert!(report.all_passed(),
+        "static checks failed: {}", report.summary());
+}
+
+#[test]
+fn performance_budgets_below_hard_limits() {
+    assert!(BUDGET_RESUME_WRITE_MS < LIMIT_RESUME_WRITE_MS);
+    assert!(BUDGET_STEP_TRANSITION_MS < LIMIT_STEP_TRANSITION_MS);
+}
+
+#[test]
+fn max_package_size_is_50_mib() {
+    assert_eq!(MAX_PACKAGE_STREAM_BYTES, 50 * 1024 * 1024);
+}
+
+#[test]
+fn timing_within_limit_passes() {
+    let m = TimingMeasurement {
+        operation: "test_op",
+        elapsed_ms: 100,
+        budget_ms: 75,
+        limit_ms: 250,
+    };
+    assert!(m.within_limit());
+    assert!(!m.within_budget()); // over budget but within limit
+    assert!(m.to_check_item().passed);
+}
+
+#[test]
+fn timing_exceeds_limit_fails() {
+    let m = TimingMeasurement {
+        operation: "test_op",
+        elapsed_ms: 1000,
+        budget_ms: 75,
+        limit_ms: 250,
+    };
+    assert!(!m.within_limit());
+    assert!(!m.to_check_item().passed);
+}
+
+#[test]
+fn health_report_summary_format() {
+    let report = run_static_checks();
+    let s = report.summary();
+    assert!(s.contains("checks passed"), "summary should mention 'checks passed': {s}");
+}
