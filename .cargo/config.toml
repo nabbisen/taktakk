@@ -1,0 +1,13 @@
+# taktakk Cargo configuration
+
+[build]
+# Default to native target for development.
+# For Android: target = "aarch64-linux-android"
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = [
+    "-D", "warnings",
+]
+
+[alias]
+xtask = "run --package xtask --"

@@ -3,7 +3,6 @@
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use sha2::{Digest, Sha256};
 
-use taktakk_core::domain::package::PackageManifest;
 use taktakk_security::trust_anchor::{TrustAnchor, TrustAnchorStatus};
 
 use crate::nmp::error::{ContentError, ContentResult};

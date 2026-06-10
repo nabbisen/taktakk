@@ -1,0 +1,21 @@
+[package]
+name = "taktakk-integration"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tokio.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+sha2.workspace = true
+taktakk-core           = { path = "../taktakk-core" }
+taktakk-content        = { path = "../taktakk-content" }
+taktakk-storage        = { path = "../taktakk-storage" }
+taktakk-security       = { path = "../taktakk-security" }
+taktakk-module-engine  = { path = "../taktakk-module-engine" }
+taktakk-sync           = { path = "../taktakk-sync" }
+taktakk-facade-clock   = { path = "../taktakk-facade-clock" }
+taktakk-i18n           = { path = "../taktakk-i18n" }

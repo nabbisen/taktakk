@@ -15,7 +15,6 @@ use taktakk_core::domain::package::{ContentPackage, PackageStatus};
 use taktakk_core::ports::package_store::ObjectStore;
 use taktakk_security::trust_anchor::TrustAnchor;
 
-use crate::nmp::error::{ContentError, ContentResult};
 use crate::nmp::reader::parse;
 use crate::verify;
 

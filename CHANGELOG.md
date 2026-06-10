@@ -103,3 +103,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - `taktakk-i18n`: BCP 47 locale, RTL/LTR direction, 3-tier fallback lookup.
 - `taktakk-a11y`: accessibility settings (contrast, motion, text scale).
 - `apps/taktakk-linux`: integration demo CLI.
+
+---
+
+## [0.9.0] — Integration & Sample Content
+
+### Added
+- `taktakk-content::samples` — three signed sample packages:
+  - `shield-water-purification` (5 steps: text/SVG/acknowledge/MC/summary, en/ar/sw)
+  - `spear-basic-math` (4 steps: text/MC/ordering/summary, en)
+  - `shield-first-aid-basics` (3 steps: text/ordering/acknowledge, en/ar)
+- `taktakk-integration` crate — 16 end-to-end tests across:
+  - Unlock/duress gesture, package install + quarantine, profile lifecycle,
+    lesson runner with crash resume, sync inventory diff, state/factory wipe,
+    key slot destruction, health check, i18n RTL/LTR resolution.
+- `apps/taktakk-linux` — full async demo showing complete platform pipeline:
+  facade → unlock → install → catalog → lesson → sync → wipe → a11y audit.
+
+### Fixed (`cargo outdated` check)
+- `hex = "0.4"` was accidentally placed in `[profile.test]` instead of
+  `[workspace.dependencies]` (found by `cargo update --dry-run`). Fixed.
+- **Unused imports** across 10 files, surfaced by activating
+  `rustflags = ["-D", "warnings"]` in `.cargo/config.toml`.
+- `[profile.test] opt-level = 1` removed (caused 7.6 GiB disk pressure).
+
+### Deferred dependency updates
+- `rand 0.8.6 → 0.10.1`: breaking change (`thread_rng()` → `rng()`).
+  Requires coordinated update of `taktakk-security/wipe.rs` and
+  `taktakk-storage/wipe.rs`. Tracked as next maintenance task.
+- `sha2 0.10.9 → 0.11.0`: may require `argon2` version bump to maintain
+  `generic-array` compat. Tracked with `rand` upgrade sprint.

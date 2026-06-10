@@ -1,7 +1,6 @@
 //! Unit tests for taktakk-module-engine (M4).
 
 use crate::catalog::{build_tile, DashboardView, ModuleTile, ProgressBadge};
-use crate::error::EngineError;
 use crate::exercise::{evaluate, max_attempts, EvalResult, ExerciseAnswer};
 use crate::runner::{LessonRunner, RunnerEvent, RunnerResponse};
 use crate::state::{LessonState, LessonStateStatus};

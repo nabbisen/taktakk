@@ -126,6 +126,7 @@ pub struct NmpReader<'a> {
     pub manifest_bytes: Vec<u8>,
     pub signature: [u8; 64],
     object_index: usize,
+    #[allow(dead_code)]
     object_count: usize,
 }
 
@@ -135,10 +136,7 @@ impl<'a> NmpReader<'a> {
         let parsed = parse(data)?;
         // Re-derive cursor position after header for streaming access.
         // For the streaming API we re-parse the header only.
-        let header_end = {
-            let mut c = 4 + 1 + 4 + parsed.manifest_bytes.len() + 4 + 64 + 4;
-            c
-        };
+        let header_end = 4 + 1 + 4 + parsed.manifest_bytes.len() + 4 + 64 + 4;
         Ok(Self {
             data,
             cursor: header_end,

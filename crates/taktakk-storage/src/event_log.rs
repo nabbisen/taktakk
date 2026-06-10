@@ -7,7 +7,7 @@
 
 use sqlx::SqlitePool;
 
-use crate::error::{StorageError, StorageResult};
+use crate::error::StorageResult;
 
 /// A single event record.
 #[derive(Debug, Clone)]

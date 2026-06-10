@@ -11,6 +11,7 @@
 pub mod fixtures;
 pub mod install;
 pub mod nmp;
+pub mod samples;
 pub mod verify;
 
 pub use nmp::error::{ContentError, ContentResult};

@@ -1,7 +1,25 @@
-//! taktakk Linux CLI entry point (M1–M4 integration demo).
+//! taktakk Linux CLI — end-to-end integration demo (v0.9.0).
+//!
+//! Demonstrates the complete platform pipeline:
+//! 1. Clock facade + stealth unlock gesture
+//! 2. Sample package install and verification
+//! 3. Lesson runner with exercise
+//! 4. Sync inventory diff between two devices
+//! 5. State wipe + health check
+//! 6. i18n RTL/LTR + accessibility audit
 
-use taktakk_a11y::settings::A11ySettings;
-use taktakk_facade_clock::gesture::{FacadeInput, GestureConfig, GestureOutcome, GestureParser};
+use taktakk_a11y::{audit::audit, settings::A11ySettings};
+use taktakk_content::{
+    fixtures::test_trust_anchor,
+    install::{install_package, InstallOutcome},
+    samples::{build_shield_water_package, build_spear_math_package},
+};
+use taktakk_core::{
+    use_cases::health_check::run_static_health_checks,
+};
+use taktakk_facade_clock::gesture::{
+    FacadeInput, GestureConfig, GestureOutcome, GestureParser,
+};
 use taktakk_i18n::{
     direction::TextDirection,
     fixtures::fixture_bundle,
@@ -9,188 +27,263 @@ use taktakk_i18n::{
     navigation::NavigationArrows,
 };
 use taktakk_module_engine::{
-    catalog::{build_tile, DashboardView},
+    catalog::build_tile,
     exercise::ExerciseAnswer,
     runner::{LessonRunner, RunnerEvent},
     state::LessonState,
     step::{ExerciseKind, ExerciseSpec, StepContent, StepKind},
 };
-use taktakk_core::domain::curriculum::{Module, ModuleStatus, ModuleVersion};
+use taktakk_storage::{repo, wipe as storage_wipe};
+use taktakk_sync::{
+    inventory::LocalInventory,
+    manifest::{build_transfer_plan, SyncAction},
+};
 
-fn main() {
-    println!("taktakk v{}", env!("CARGO_PKG_VERSION"));
+#[tokio::main]
+async fn main() {
+    println!("┌─────────────────────────────────────────────┐");
+    println!("│  taktakk v{}  — end-to-end demo         │", env!("CARGO_PKG_VERSION"));
+    println!("└─────────────────────────────────────────────┘");
     println!();
 
-    demo_unlock();
-    demo_i18n_rtl();
-    demo_dashboard();
+    // 1. Clock facade + unlock
+    demo_clock_and_unlock();
+
+    // 2. Package install (async — uses tokio::main)
+    demo_package_install().await;
+
+    // 3. Lesson runner
     demo_lesson_runner();
-    demo_a11y();
+
+    // 4. Sync inventory
+    demo_sync_inventory();
+
+    // 5. i18n + RTL
+    demo_i18n_rtl();
+
+    // 6. Accessibility audit
+    demo_a11y_audit();
 }
 
-// ── M1: Clock facade & unlock ─────────────────────────────────────────────────
+// ── 1. Clock facade + stealth unlock ─────────────────────────────────────────
 
-fn demo_unlock() {
-    println!("=== Clock Facade / Unlock (M1) ===");
+fn demo_clock_and_unlock() {
+    println!("═══ 1. Clock Facade + Stealth Unlock ═══════════");
     let cfg = GestureConfig::default_config();
-    let mut p = GestureParser::new(cfg);
-    p.process(FacadeInput::AlarmSet { hour: 3, minute: 14 });
-    let out = p.process(FacadeInput::AlarmConfirmLongPress { duration_ms: 3000 });
-    match out {
-        GestureOutcome::Unlock => println!("  Unlock gesture -> shell opened"),
-        GestureOutcome::Duress => println!("  Duress gesture -> wipe initiated"),
-        _ => println!("  No action"),
-    }
+    println!("Facade shows a plain clock. Unlock: set alarm {:02}:{:02} + hold Save.",
+        cfg.drift_h, cfg.drift_m);
+    println!("Duress: set alarm {:02}:{:02} + hold Save → silent wipe.",
+        cfg.offset_h, cfg.offset_m);
+
+    let mut parser = GestureParser::new(cfg.clone());
+
+    // Simulate unlock
+    parser.process(FacadeInput::AlarmSet { hour: cfg.drift_h, minute: cfg.drift_m });
+    let out = parser.process(FacadeInput::AlarmConfirmLongPress { duration_ms: 3000 });
+    println!("Gesture result: {:?}", out);
+    assert_eq!(out, GestureOutcome::Unlock);
+
+    // Simulate duress
+    parser.reset();
+    parser.process(FacadeInput::AlarmSet { hour: cfg.offset_h, minute: cfg.offset_m });
+    let duress = parser.process(FacadeInput::AlarmConfirmLongPress { duration_ms: 3500 });
+    println!("Duress result:  {:?}", duress);
+    assert_eq!(duress, GestureOutcome::Duress);
     println!();
 }
 
-// ── M1+M4: i18n + RTL navigation ─────────────────────────────────────────────
+// ── 2. Package install ────────────────────────────────────────────────────────
 
-fn demo_i18n_rtl() {
-    println!("=== i18n / RTL Navigation (M1+M4) ===");
-    let bundle = fixture_bundle();
+async fn demo_package_install() {
+    println!("═══ 2. Package Install + Catalog ═══════════════");
 
-    for locale_str in ["en", "ar", "sw"] {
-        let locale = LocaleTag::new(locale_str);
-        let dir = locale.direction();
-        let dir_label = match dir {
-            TextDirection::Ltr => "LTR",
-            TextDirection::Rtl => "RTL",
+    let data_dir = std::env::temp_dir().join(format!("taktakk-demo-{}", nonce()));
+    std::fs::create_dir_all(&data_dir).unwrap();
+
+    let db = taktakk_storage::db::Database::open(&data_dir).await
+        .expect("open database");
+    let store = taktakk_storage::object_store::FsObjectStore::new(
+        data_dir.join("objects")
+    );
+    let anchors = vec![test_trust_anchor()];
+
+    for (i, (module_id, builder)) in [
+        ("shield-water-purification", build_shield_water_package()),
+        ("spear-basic-math",          build_spear_math_package()),
+    ].iter().enumerate() {
+        let nmp = builder.as_ref().expect("build sample package");
+        let outcome = install_package(nmp, &format!("pkg-{i:03}"), &anchors, &store, i as i64);
+        match outcome {
+            InstallOutcome::Installed { package } => {
+                println!("  ✓ Installed: {} (v{})", module_id, package.version);
+                repo::package::save(&db.core, &package).await.unwrap();
+            }
+            InstallOutcome::Quarantined { reason } => {
+                println!("  ✗ Quarantined {module_id}: {reason}");
+            }
+        }
+    }
+
+    // Build catalog tiles
+    let pkgs = repo::package::list(&db.core).await.unwrap();
+    println!("  Catalog ({} installed packages):", pkgs.len());
+
+    for pkg in &pkgs {
+        let module = taktakk_core::domain::curriculum::Module {
+            module_id: pkg.module_id.clone(),
+            category_id: if pkg.module_id.starts_with("shield") {
+                "shield-hygiene".to_string()
+            } else {
+                "spear-logic".to_string()
+            },
+            title_key: format!("{}.title", pkg.module_id),
+            description_key: format!("{}.desc", pkg.module_id),
+            version: pkg.version.clone(),
+            status: taktakk_core::domain::curriculum::ModuleStatus::Available,
+            estimated_minutes: Some(10),
         };
-        let nav = NavigationArrows::for_direction(dir);
-        let back_label  = bundle.t(&locale, "nav.back");
-        let next_label  = bundle.t(&locale, "nav.next");
-        let back_arrow  = if nav.back  == taktakk_i18n::navigation::ArrowDir::Left { "<-" } else { "->" };
-        let next_arrow  = if nav.forward == taktakk_i18n::navigation::ArrowDir::Right { "->" } else { "<-" };
-        println!("  [{locale_str}] ({dir_label})  [{back_arrow} {back_label}]  [{next_label} {next_arrow}]");
+        let tile = build_tile(&module, 0, 5);
+        println!("    [{:?}] {} — {:?}", tile.axis, tile.module_id, tile.progress);
     }
+
+    // State wipe demo
+    storage_wipe::state_wipe(&db.core).await.unwrap();
+    println!("  State wipe: progress cleared, packages intact.");
+
+    // Health check
+    let report = run_static_health_checks(pkgs.len(), anchors.len(), 2, Some(500_000_000), 0);
+    println!("  Health: {}", report.summary());
+
+    let _ = std::fs::remove_dir_all(&data_dir);
     println!();
 }
 
-// ── M4: Dashboard catalog ─────────────────────────────────────────────────────
-
-fn demo_dashboard() {
-    println!("=== Shield / Spear Dashboard (M4) ===");
-    let shield_modules = vec![
-        make_module("shield-water",     "shield-hygiene", "shield.water.title"),
-        make_module("shield-first-aid", "shield-medical", "shield.firstaid.title"),
-    ];
-    let spear_modules = vec![
-        make_module("spear-math",  "spear-logic", "spear.math.title"),
-        make_module("spear-comms", "spear-comms", "spear.comms.title"),
-    ];
-
-    let progress = [
-        ("shield-water", 8u32, 10u32),
-        ("shield-first-aid", 0, 12),
-        ("spear-math", 5, 5),
-        ("spear-comms", 2, 8),
-    ];
-
-    let mut shield_tiles = vec![];
-    let mut spear_tiles  = vec![];
-
-    for m in &shield_modules {
-        let (_, done, total) = progress.iter().find(|(id, _, _)| *id == m.module_id).unwrap();
-        shield_tiles.push(build_tile(m, *done, *total));
-    }
-    for m in &spear_modules {
-        let (_, done, total) = progress.iter().find(|(id, _, _)| *id == m.module_id).unwrap();
-        spear_tiles.push(build_tile(m, *done, *total));
-    }
-
-    let dash = DashboardView::new(shield_tiles, spear_tiles);
-    for tile in dash.all_tiles() {
-        let pct = (tile.progress.fraction() * 100.0) as u32;
-        println!("  [{:?}] {} — {}%  {:?}", tile.axis, tile.module_id, pct, tile.progress);
-    }
-    println!("  Completed modules: {}", dash.completed_count());
-    println!();
-}
-
-// ── M4: Lesson runner with exercise ──────────────────────────────────────────
+// ── 3. Lesson runner ──────────────────────────────────────────────────────────
 
 fn demo_lesson_runner() {
-    println!("=== Lesson Runner (M4) ===");
+    println!("═══ 3. Lesson Runner ════════════════════════════");
     let steps = vec![
-        // Step 0: Text
-        StepContent {
-            step_id: "s0".to_string(), sort_order: 0,
-            kind: StepKind::Text { text_key: "lesson.intro".to_string() },
-            caption_key: None, audio_object_hash: None, aria_label_key: None,
-        },
-        // Step 1: Multiple-choice exercise
-        StepContent {
-            step_id: "s1".to_string(), sort_order: 1,
-            kind: StepKind::Exercise(ExerciseSpec {
-                exercise_id: "ex-1".to_string(),
-                kind: ExerciseKind::MultipleChoice {
-                    question_key: "q.water.safe".to_string(),
-                    options: vec![
-                        ("A".to_string(), "opt.boil".to_string()),
-                        ("B".to_string(), "opt.filter".to_string()),
-                        ("C".to_string(), "opt.pray".to_string()),
-                    ],
-                    correct_option_id: "A".to_string(),
-                },
-            }),
-            caption_key: None, audio_object_hash: None, aria_label_key: None,
-        },
-        // Step 2: Text (final)
-        StepContent {
-            step_id: "s2".to_string(), sort_order: 2,
-            kind: StepKind::Text { text_key: "lesson.summary".to_string() },
-            caption_key: None, audio_object_hash: None, aria_label_key: None,
-        },
+        text_step("s0", 0, "shield.water.s0.text"),
+        mc_step("s1", 1, "A", &["A: Boil 1 min", "B: Add sand", "C: Sunlight"]),
+        text_step("s2", 2, "shield.water.s4.summary"),
     ];
 
-    let state = LessonState::new("profile-001".to_string(), "shield-water-01".to_string(), 3, 0);
+    let state = LessonState::new("user-001".to_string(), "lesson-01".to_string(), 3, 0);
     let mut runner = LessonRunner::new(state, steps);
 
-    // Step 0: text advance
-    let r = runner.handle(RunnerEvent::Advance).unwrap();
-    println!("  Step 0 advance -> {:?}", r);
+    // Step 0: advance
+    let r0 = runner.handle(RunnerEvent::Advance).unwrap();
+    println!("  Step 0 advance → {:?}", r0);
 
-    // Step 1: wrong answer first, then correct
+    // Step 1: wrong answer, then correct
     let wrong = runner.handle(RunnerEvent::Answer(
         ExerciseAnswer::MultipleChoice { chosen_option_id: "C".to_string() },
     )).unwrap();
-    println!("  Step 1 wrong answer -> {:?}", wrong);
+    println!("  Step 1 wrong  → {:?}", wrong);
 
-    let correct = runner.handle(RunnerEvent::Answer(
+    let ok = runner.handle(RunnerEvent::Answer(
         ExerciseAnswer::MultipleChoice { chosen_option_id: "A".to_string() },
     )).unwrap();
-    println!("  Step 1 correct answer -> {:?}", correct);
+    println!("  Step 1 correct → {:?}", ok);
 
-    // Step 2: final step
+    // Step 2: final
     let done = runner.handle(RunnerEvent::Advance).unwrap();
-    println!("  Step 2 advance -> {:?}", done);
+    println!("  Step 2 final  → {:?}", done);
     println!("  Progress: {:.0}%", runner.state.progress_fraction() * 100.0);
     println!();
 }
 
-// ── M1: Accessibility ─────────────────────────────────────────────────────────
+fn text_step(id: &str, order: u32, key: &str) -> StepContent {
+    StepContent {
+        step_id: id.to_string(), sort_order: order,
+        kind: StepKind::Text { text_key: key.to_string() },
+        caption_key: None, audio_object_hash: None, aria_label_key: None,
+    }
+}
 
-fn demo_a11y() {
-    println!("=== Accessibility Settings (M1) ===");
-    let s = A11ySettings::default();
-    println!(
-        "  Contrast: {:?}  Motion: {:?}  Touch: {}  Scale: {:.1}x",
-        s.contrast_mode, s.motion_preference,
-        if s.large_touch_targets { "large(48dp+)" } else { "normal" },
-        s.clamped_text_scale(),
-    );
+fn mc_step(id: &str, order: u32, correct: &str, opts: &[&str]) -> StepContent {
+    StepContent {
+        step_id: id.to_string(), sort_order: order,
+        kind: StepKind::Exercise(ExerciseSpec {
+            exercise_id: format!("ex-{id}"),
+            kind: ExerciseKind::MultipleChoice {
+                question_key: "q".to_string(),
+                options: opts.iter().enumerate().map(|(i, _)| {
+                    let id = (b'A' + i as u8) as char;
+                    (id.to_string(), id.to_string())
+                }).collect(),
+                correct_option_id: correct.to_string(),
+            },
+        }),
+        caption_key: None, audio_object_hash: None, aria_label_key: None,
+    }
+}
+
+// ── 4. Sync inventory diff ────────────────────────────────────────────────────
+
+fn demo_sync_inventory() {
+    println!("═══ 4. Sync Inventory (P2P diff) ════════════════");
+
+    let device_a = LocalInventory::build(vec![
+        ("shield-water-purification".to_string(), "1.0.0".to_string(), "hash-a".to_string()),
+    ]);
+    let device_b = LocalInventory::build(vec![
+        ("shield-water-purification".to_string(), "1.0.0".to_string(), "hash-a".to_string()),
+        ("spear-basic-math".to_string(),          "1.0.0".to_string(), "hash-b".to_string()),
+        ("shield-first-aid-basics".to_string(),   "1.0.0".to_string(), "hash-c".to_string()),
+    ]);
+
+    println!("  Device A has {} package(s).", device_a.items.len());
+    println!("  Device B has {} package(s).", device_b.items.len());
+
+    let plan = build_transfer_plan(&device_a, &device_b);
+    for item in &plan {
+        let label = match item.action {
+            SyncAction::Receive    => "← RECEIVE",
+            SyncAction::Send       => "→ SEND   ",
+            SyncAction::Skip       => "= SKIP   ",
+            SyncAction::VerifyOnly => "? VERIFY ",
+        };
+        println!("    {label}  {}", item.package_id);
+    }
     println!();
 }
 
-fn make_module(id: &str, cat: &str, title_key: &str) -> Module {
-    Module {
-        module_id: id.to_string(),
-        category_id: cat.to_string(),
-        title_key: title_key.to_string(),
-        description_key: format!("{id}.desc"),
-        version: ModuleVersion::new(1, 0, 0),
-        status: ModuleStatus::Available,
-        estimated_minutes: Some(15),
+// ── 5. i18n + RTL ────────────────────────────────────────────────────────────
+
+fn demo_i18n_rtl() {
+    println!("═══ 5. i18n + RTL Navigation ════════════════════");
+    let bundle = fixture_bundle();
+
+    for tag_str in ["en", "ar", "sw"] {
+        let tag = LocaleTag::new(tag_str);
+        let dir = tag.direction();
+        let nav = NavigationArrows::for_direction(dir);
+        let dir_label = match dir { TextDirection::Ltr => "LTR", TextDirection::Rtl => "RTL" };
+        let back_arrow  = if nav.back  == taktakk_i18n::navigation::ArrowDir::Left  { "←" } else { "→" };
+        let fwd_arrow   = if nav.forward == taktakk_i18n::navigation::ArrowDir::Right { "→" } else { "←" };
+        let back_label  = bundle.t(&tag, "nav.back");
+        let next_label  = bundle.t(&tag, "nav.next");
+        println!("  [{tag_str}] ({dir_label})  [{back_arrow} {back_label}]  [{next_label} {fwd_arrow}]");
     }
+    println!();
+}
+
+// ── 6. Accessibility audit ────────────────────────────────────────────────────
+
+fn demo_a11y_audit() {
+    println!("═══ 6. Accessibility Audit (ABDD) ═══════════════");
+    let settings = A11ySettings::default();
+    let report = audit(&settings);
+    println!("  {}", report.summary());
+    for check in &report.checks {
+        let mark = if check.passed { "✓" } else { "✗" };
+        println!("  {mark} {}", check.check_id);
+    }
+    println!();
+}
+
+fn nonce() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().subsec_nanos() as u64
 }

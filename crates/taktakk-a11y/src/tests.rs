@@ -33,7 +33,7 @@ fn text_scale_in_range_unchanged() {
 
 // ── Accessibility audit (M7) ──────────────────────────────────────────────────
 
-use crate::audit::{audit, check_locale_direction_coverage, A11yCheckResult};
+use crate::audit::{audit, check_locale_direction_coverage};
 
 #[test]
 fn default_settings_pass_audit() {

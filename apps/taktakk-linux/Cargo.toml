@@ -11,9 +11,14 @@ name = "taktakk"
 path = "src/main.rs"
 
 [dependencies]
+tokio.workspace = true
+serde_json.workspace = true
 taktakk-core           = { path = "../../crates/taktakk-core" }
 taktakk-facade-clock   = { path = "../../crates/taktakk-facade-clock" }
 taktakk-security       = { path = "../../crates/taktakk-security" }
 taktakk-i18n           = { path = "../../crates/taktakk-i18n" }
 taktakk-a11y           = { path = "../../crates/taktakk-a11y" }
 taktakk-module-engine  = { path = "../../crates/taktakk-module-engine" }
+taktakk-content        = { path = "../../crates/taktakk-content" }
+taktakk-storage        = { path = "../../crates/taktakk-storage" }
+taktakk-sync           = { path = "../../crates/taktakk-sync" }

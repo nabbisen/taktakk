@@ -1,8 +1,6 @@
 //! Panic wipe coordinator implementation (RFC 018).
 
 use rand::RngCore;
-use taktakk_core::error::CoreResult;
-use taktakk_core::ports::crypto::WipeCoordinator;
 
 use crate::key_slot::{CryptoKeySlot, KeyStatus};
 

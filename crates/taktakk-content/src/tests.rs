@@ -123,7 +123,7 @@ fn empty_trust_store_fails() {
 
 #[test]
 fn revoked_anchor_fails() {
-    use taktakk_security::trust_anchor::{TrustAnchor, TrustAnchorStatus};
+    use taktakk_security::trust_anchor::TrustAnchorStatus;
     let pkg = build_test_package("test", vec![]).unwrap();
     let parsed = parse(&pkg).unwrap();
 

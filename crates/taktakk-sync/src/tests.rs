@@ -4,7 +4,7 @@ use crate::chunk::{
     pending_chunk_indices, reassemble_chunks, split_into_chunks, verify_chunk,
     ChunkStatus, DEFAULT_CHUNK_SIZE,
 };
-use crate::import::{scan_directory, source_label_hash, ImportStatus, ItemVerifyResult};
+use crate::import::{scan_directory, source_label_hash};
 use crate::inventory::LocalInventory;
 use crate::manifest::{build_transfer_plan, deserialise_inventory, serialise_inventory, SyncAction};
 use crate::permission::{build_requests, required_permissions, AppPermission, TriggerAction};
@@ -160,8 +160,6 @@ fn split_multi_chunk_object() {
 #[test]
 fn verify_chunk_correct_hash() {
     let data = b"chunk data";
-    let hash = hex::encode(sha2::Digest::finalize(sha2::Sha256::new_with_prefix(data)));
-    // Use the real sha2 API
     use sha2::{Digest, Sha256};
     let real_hash = hex::encode(Sha256::digest(data));
     assert!(verify_chunk(data, &real_hash));

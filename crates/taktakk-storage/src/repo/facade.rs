@@ -5,7 +5,7 @@
 
 use sqlx::SqlitePool;
 
-use crate::error::{StorageError, StorageResult};
+use crate::error::StorageResult;
 
 // ── Clock settings (key-value) ────────────────────────────────────────────────
 

@@ -11,14 +11,10 @@ Offline-first secure self-learning distribution.
 
 ## Overview
 
-taktakk is an offline-first educational platform for communities in
-conflict zones, refugee camps, and areas with no reliable network or power.
-It delivers survival knowledge (Shield) and empowerment knowledge (Spear)
-on low-spec Android phones without touching the internet.
-
-The app disguises itself as a plain clock. Only users who know a specific
-gesture sequence can access the learning platform. Data can be destroyed
-instantly if the device is threatened.
+taktakk is an offline-first educational platform for communities
+with no reliable network or power.
+It delivers empowerment knowledge (Spear) on low-spec Android phones
+without touching the internet.
 
 ---
 
@@ -72,8 +68,7 @@ for workspace layout and crate responsibilities.
 | Accessibility audit (ABDD) | ✅ M7 |
 | Security review checklist | ✅ M7 |
 
-> **⚠ Security-sensitive software.** This project operates in environments
-> where device inspection can endanger lives. Review the
+> **⚠ Security-sensitive software.** Review the
 > [threat model](docs/security-reviewers/threat-model.md) before deployment.
 
 ---

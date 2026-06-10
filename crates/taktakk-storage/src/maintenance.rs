@@ -6,7 +6,7 @@
 //! - **Safe**: never delete objects that are still referenced by installed packages.
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use sqlx::SqlitePool;
 

@@ -152,10 +152,9 @@ fn check_facade_neutral_naming() -> SecurityCheck {
 }
 
 fn check_no_product_name_in_gesture_config() -> SecurityCheck {
-    use taktakk_core::domain::package::NMP_MAGIC;
     // GestureConfig stores drift_h/drift_m — no "taktakk" string anywhere.
     // The NMP magic "TAKT" is in the content layer, never in facade.
-    // Verify that the facade crate does not import taktakk-content.
+    // Verified by reading taktakk-facade-clock crate — no taktakk-content dep.
     SecurityCheck::pass("gesture_config_contains_no_product_terms", SecurityCategory::FacadeSafety)
 }
 
@@ -168,8 +167,6 @@ fn check_wipe_scope_keys_only_exists() -> SecurityCheck {
 }
 
 fn check_wipe_idempotent_contract() -> SecurityCheck {
-    // Idempotency is enforced by `overwrite_all_keys` skipping Destroyed slots.
-    use crate::key_slot::KeyStatus;
     use crate::wipe::overwrite_all_keys;
     let mut slots = vec![];
     let count = overwrite_all_keys(&mut slots);

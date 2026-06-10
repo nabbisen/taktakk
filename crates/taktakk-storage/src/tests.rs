@@ -602,7 +602,7 @@ fn cleanup_partial_removes_files() {
 
 // ── Storage maintenance (M9) ──────────────────────────────────────────────────
 
-use crate::maintenance::{expire_quarantine, gc_object_store, spot_check_objects};
+use crate::maintenance::{gc_object_store, spot_check_objects};
 
 #[test]
 fn gc_removes_orphaned_objects() {
