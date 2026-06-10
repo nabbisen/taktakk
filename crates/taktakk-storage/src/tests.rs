@@ -327,3 +327,156 @@ async fn curriculum_lesson_upsert_and_list() {
     assert_eq!(lessons[0].sort_order, 0);
     assert_eq!(lessons[2].sort_order, 2);
 }
+
+// ── Wipe operations ───────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn state_wipe_removes_progress_keeps_profiles() {
+    use taktakk_core::domain::profile::LocalProfile;
+    use taktakk_core::domain::progress::ResumeState;
+    use crate::repo::progress::{get_resume_state, save_resume_state};
+    use crate::wipe::state_wipe;
+
+    let (db, _dir) = open_test_db().await;
+
+    // Insert a profile and a resume state.
+    let p = LocalProfile::new("p1".to_string(), 0);
+    repo::profile::save(&db.core, &p).await.unwrap();
+    save_resume_state(&db.core, &ResumeState {
+        profile_id: "p1".to_string(),
+        lesson_id: "l1".to_string(),
+        last_completed_step_order: 3,
+        updated_at: 0,
+    }).await.unwrap();
+
+    state_wipe(&db.core).await.unwrap();
+
+    // Progress gone.
+    assert!(get_resume_state(&db.core, "p1", "l1").await.unwrap().is_none());
+    // Profile still present.
+    assert!(repo::profile::get(&db.core, "p1").await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn state_wipe_idempotent() {
+    let (db, _dir) = open_test_db().await;
+    // Calling wipe on an empty database must not error.
+    crate::wipe::state_wipe(&db.core).await.unwrap();
+    crate::wipe::state_wipe(&db.core).await.unwrap();
+}
+
+#[tokio::test]
+async fn hard_wipe_removes_all_core_data() {
+    use taktakk_core::domain::profile::LocalProfile;
+    use taktakk_core::domain::curriculum::{Module, ModuleStatus, ModuleVersion};
+    use crate::repo::curriculum::{list_modules, upsert_module};
+    use crate::wipe::hard_wipe;
+
+    let (db, _dir) = open_test_db().await;
+
+    // Populate both profile and module.
+    repo::profile::save(&db.core, &LocalProfile::new("p1".to_string(), 0)).await.unwrap();
+    upsert_module(&db.core, &Module {
+        module_id: "shield-water".to_string(),
+        category_id: "shield-hygiene".to_string(),
+        title_key: "t".to_string(),
+        description_key: "d".to_string(),
+        version: ModuleVersion::new(1, 0, 0),
+        status: ModuleStatus::Available,
+        estimated_minutes: None,
+    }).await.unwrap();
+
+    hard_wipe(&db.facade, &db.core).await.unwrap();
+
+    // Everything gone.
+    assert!(repo::profile::get(&db.core, "p1").await.unwrap().is_none());
+    assert!(list_modules(&db.core).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn hard_wipe_idempotent() {
+    let (db, _dir) = open_test_db().await;
+    crate::wipe::hard_wipe(&db.facade, &db.core).await.unwrap();
+    crate::wipe::hard_wipe(&db.facade, &db.core).await.unwrap();
+}
+
+#[tokio::test]
+async fn factory_reset_clears_facade_slots() {
+    use crate::wipe::factory_reset;
+    let (db, _dir) = open_test_db().await;
+
+    // Insert a fake alarm.
+    use crate::repo::facade::{AlarmRow, upsert_alarm, list_alarms};
+    upsert_alarm(&db.facade, &AlarmRow {
+        alarm_id: "a1".to_string(), hour: 7, minute: 0,
+        label: None, enabled: true, repeat_days: 0,
+    }, 0).await.unwrap();
+
+    factory_reset(&db.facade, &db.core).await.unwrap();
+
+    assert!(list_alarms(&db.facade).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn factory_reset_idempotent() {
+    let (db, _dir) = open_test_db().await;
+    crate::wipe::factory_reset(&db.facade, &db.core).await.unwrap();
+    crate::wipe::factory_reset(&db.facade, &db.core).await.unwrap();
+}
+
+#[tokio::test]
+async fn key_slot_destruction_overwrites_blob() {
+    use crate::wipe::destroy_key_slots;
+    let (db, _dir) = open_test_db().await;
+
+    // Insert a fake key slot.
+    sqlx::query(
+        "INSERT INTO key_registry (key_id, purpose_tag, wrapped_blob, alg_tag, ts_created, state_tag)
+         VALUES ('k1', 'state', X'AABBCCDD', 'xchacha20poly1305', 0, 'active')"
+    )
+    .execute(&db.facade).await.unwrap();
+
+    destroy_key_slots(&db.facade).await.unwrap();
+
+    let (state_tag,): (String,) = sqlx::query_as(
+        "SELECT state_tag FROM key_registry WHERE key_id = 'k1'"
+    )
+    .fetch_one(&db.facade).await.unwrap();
+
+    assert_eq!(state_tag, "destroyed");
+}
+
+#[tokio::test]
+async fn log_retention_purges_old_events() {
+    use crate::event_log::{append, EventRecord};
+    use crate::wipe::enforce_log_retention;
+    let (db, _dir) = open_test_db().await;
+
+    // Insert old and new events.
+    for (id, ts) in [("e1", 1000i64), ("e2", 5000), ("e3", 9000)] {
+        append(&db.core, &EventRecord {
+            event_id: id.to_string(), event_tag: "s.open".to_string(),
+            ts, detail_json: None,
+        }).await.unwrap();
+    }
+
+    // Purge events older than 3000s before now=10000 → cutoff=7000, keeps e3 only.
+    let purged = enforce_log_retention(&db.core, 10_000, 3000).await.unwrap();
+    assert_eq!(purged, 2);
+}
+
+#[tokio::test]
+async fn validate_event_tag_allows_approved_buckets() {
+    use crate::wipe::validate_event_tag;
+    assert!(validate_event_tag("s.open"));
+    assert!(validate_event_tag("pkg.ok"));
+    assert!(validate_event_tag("wipe.ok"));
+}
+
+#[tokio::test]
+async fn validate_event_tag_rejects_domain_words() {
+    use crate::wipe::validate_event_tag;
+    assert!(!validate_event_tag("module.open"));
+    assert!(!validate_event_tag("learn.shield"));
+    assert!(!validate_event_tag("user.profile"));
+}

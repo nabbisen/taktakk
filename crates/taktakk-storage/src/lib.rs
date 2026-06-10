@@ -10,6 +10,7 @@ pub mod error;
 pub mod event_log;
 pub mod object_store;
 pub mod repo;
+pub mod wipe;
 
 pub use db::Database;
 pub use error::{StorageError, StorageResult};

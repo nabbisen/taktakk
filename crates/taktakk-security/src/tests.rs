@@ -90,3 +90,68 @@ fn redact_preserves_newlines() {
     let r = redact(s);
     assert!(r.contains('\n'));
 }
+
+// ── Wipe: 7-pass overwrite ────────────────────────────────────────────────────
+
+#[test]
+fn seven_pass_overwrite_differs_from_original() {
+    let mut slot = make_slot("k1", KeyStatus::Active);
+    let original = slot.wrapped_key.clone();
+    overwrite_key_slot(&mut slot);
+    // After 7 passes the final value is (overwhelmingly) different from 0xAA fill.
+    assert_ne!(slot.wrapped_key, original);
+    assert_eq!(slot.status, KeyStatus::Destroyed);
+}
+
+#[test]
+fn overwrite_all_skips_destroyed_slots() {
+    let mut slots = vec![
+        make_slot("k1", KeyStatus::Active),
+        make_slot("k2", KeyStatus::Destroyed),
+    ];
+    let count = overwrite_all_keys(&mut slots);
+    assert_eq!(count, 1);
+    assert_eq!(slots[1].status, KeyStatus::Destroyed); // unchanged
+}
+
+// ── Log tag safety ────────────────────────────────────────────────────────────
+
+use crate::wipe::is_safe_log_tag;
+
+#[test]
+fn approved_bucket_tags_are_safe() {
+    assert!(is_safe_log_tag("s.open"));
+    assert!(is_safe_log_tag("pkg.ok"));
+    assert!(is_safe_log_tag("wipe.ok"));
+    assert!(is_safe_log_tag("integ.fail"));
+}
+
+#[test]
+fn domain_words_rejected() {
+    assert!(!is_safe_log_tag("shield-water"));
+    assert!(!is_safe_log_tag("module.open"));
+    assert!(!is_safe_log_tag("learn.step"));
+    assert!(!is_safe_log_tag("user.profile.123"));
+}
+
+#[test]
+fn very_long_tag_rejected() {
+    assert!(!is_safe_log_tag(&"x".repeat(25)));
+}
+
+// ── Idempotency: overwriting already-destroyed slots ─────────────────────────
+
+#[test]
+fn wipe_idempotent_on_empty_slots() {
+    let mut slots: Vec<CryptoKeySlot> = vec![];
+    assert_eq!(overwrite_all_keys(&mut slots), 0);
+}
+
+#[test]
+fn wipe_idempotent_called_twice() {
+    let mut slots = vec![make_slot("k1", KeyStatus::Active)];
+    overwrite_all_keys(&mut slots);
+    // Second call: slot is already destroyed, should return 0.
+    let count = overwrite_all_keys(&mut slots);
+    assert_eq!(count, 0);
+}

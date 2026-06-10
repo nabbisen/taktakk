@@ -209,3 +209,55 @@ fn plan_download_no_missing_returns_empty() {
     let missing = plan_download(&items, &items);
     assert!(missing.is_empty());
 }
+
+// ── Safety settings ───────────────────────────────────────────────────────────
+
+use crate::use_cases::safety_settings::{
+    DuressAction, EventBucket, LogRetentionPolicy, SafetySettings,
+};
+
+#[test]
+fn safety_settings_defaults_are_conservative() {
+    let s = SafetySettings::default();
+    assert_eq!(s.duress_action, DuressAction::CryptoErase);
+    assert!(s.log_policy.purge_on_start);
+    assert!(s.log_policy.anonymise_tags);
+    assert_eq!(s.log_policy.max_age_seconds, 86_400);
+}
+
+#[test]
+fn log_retention_policy_valid_range() {
+    let ok = LogRetentionPolicy { max_age_seconds: 3600, ..Default::default() };
+    assert!(ok.validate().is_ok());
+    let too_short = LogRetentionPolicy { max_age_seconds: 100, ..Default::default() };
+    assert!(too_short.validate().is_err());
+    let too_long = LogRetentionPolicy { max_age_seconds: 700_000, ..Default::default() };
+    assert!(too_long.validate().is_err());
+}
+
+#[test]
+fn event_bucket_tags_are_approved() {
+    for bucket in &[
+        EventBucket::SessionOpen, EventBucket::SessionClose,
+        EventBucket::InstallOk, EventBucket::InstallFail,
+        EventBucket::WipeOk, EventBucket::SyncOk, EventBucket::SyncFail,
+        EventBucket::ImportOk, EventBucket::ImportFail, EventBucket::IntegrityFail,
+    ] {
+        assert!(EventBucket::is_approved(bucket.tag()),
+            "bucket {:?} tag '{}' should be approved", bucket, bucket.tag());
+    }
+}
+
+#[test]
+fn unknown_event_tag_is_rejected() {
+    assert!(!EventBucket::is_approved("shield-water-purification"));
+    assert!(!EventBucket::is_approved("user.action"));
+    assert!(!EventBucket::is_approved("module.open"));
+}
+
+#[test]
+fn state_wipe_scope_variants_distinct() {
+    use crate::use_cases::safety_settings::StateWipeScope;
+    assert_ne!(StateWipeScope::ProgressOnly, StateWipeScope::ProfilesAndProgress);
+    assert_ne!(StateWipeScope::ProfilesAndProgress, StateWipeScope::AllUserData);
+}
