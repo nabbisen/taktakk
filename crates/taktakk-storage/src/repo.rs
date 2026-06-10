@@ -5,3 +5,4 @@ pub mod facade;
 pub mod package;
 pub mod profile;
 pub mod progress;
+pub mod sync;

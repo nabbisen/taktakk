@@ -143,6 +143,57 @@ async fn run_core_migrations(pool: &SqlitePool) -> StorageResult<()> {
             event_id TEXT PRIMARY KEY NOT NULL, event_tag TEXT NOT NULL,
             ts INTEGER NOT NULL, detail_json TEXT)",
         "CREATE INDEX IF NOT EXISTS event_log_ts ON event_log (ts)",
+        // ── Sync & import ─────────────────────────────────────────────────
+        "CREATE TABLE IF NOT EXISTS sync_sessions (
+            sync_session_id     TEXT PRIMARY KEY NOT NULL,
+            transport           TEXT NOT NULL,
+            peer_ephemeral_hash TEXT,
+            started_at          INTEGER NOT NULL,
+            ended_at            INTEGER,
+            status              TEXT NOT NULL,
+            packages_received   INTEGER NOT NULL DEFAULT 0,
+            packages_sent       INTEGER NOT NULL DEFAULT 0,
+            retention_until     INTEGER
+        )",
+        "CREATE TABLE IF NOT EXISTS sync_manifest_items (
+            sync_session_id      TEXT NOT NULL,
+            package_id           TEXT NOT NULL,
+            local_manifest_hash  TEXT,
+            remote_manifest_hash TEXT,
+            action               TEXT NOT NULL,
+            status               TEXT NOT NULL,
+            PRIMARY KEY (sync_session_id, package_id),
+            FOREIGN KEY (sync_session_id) REFERENCES sync_sessions(sync_session_id)
+        )",
+        "CREATE TABLE IF NOT EXISTS transfer_chunks (
+            transfer_id  TEXT NOT NULL,
+            object_hash  TEXT NOT NULL,
+            chunk_index  INTEGER NOT NULL,
+            chunk_hash   TEXT NOT NULL,
+            byte_size    INTEGER NOT NULL,
+            status       TEXT NOT NULL,
+            updated_at   INTEGER NOT NULL,
+            PRIMARY KEY (transfer_id, chunk_index)
+        )",
+        "CREATE TABLE IF NOT EXISTS import_jobs (
+            import_job_id     TEXT PRIMARY KEY NOT NULL,
+            source_kind       TEXT NOT NULL,
+            source_label_hash TEXT,
+            started_at        INTEGER NOT NULL,
+            completed_at      INTEGER,
+            status            TEXT NOT NULL,
+            found_count       INTEGER NOT NULL DEFAULT 0,
+            installed_count   INTEGER NOT NULL DEFAULT 0
+        )",
+        "CREATE TABLE IF NOT EXISTS import_job_items (
+            import_job_id          TEXT NOT NULL,
+            package_id             TEXT NOT NULL,
+            detected_manifest_hash TEXT NOT NULL,
+            verify_result          TEXT NOT NULL,
+            install_result         TEXT,
+            PRIMARY KEY (import_job_id, package_id),
+            FOREIGN KEY (import_job_id) REFERENCES import_jobs(import_job_id)
+        )",
     ]).await?;
 
     // Post-migration integrity check (RFC 006).

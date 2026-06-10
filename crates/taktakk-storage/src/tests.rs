@@ -480,3 +480,73 @@ async fn validate_event_tag_rejects_domain_words() {
     assert!(!validate_event_tag("learn.shield"));
     assert!(!validate_event_tag("user.profile"));
 }
+
+// ── Sync session repository (M6) ──────────────────────────────────────────────
+
+#[tokio::test]
+async fn sync_session_save_and_retrieve() {
+    use taktakk_core::domain::sync::{SyncSession, SyncStatus, TransportKind};
+    use crate::repo::sync::{get_sync_session, save_sync_session};
+    let (db, _dir) = open_test_db().await;
+
+    let s = SyncSession {
+        session_id: "sess-001".to_string(),
+        peer_ephemeral_id: "peer-abc".to_string(),
+        transport: TransportKind::LocalFile,
+        started_at: 1000,
+        completed_at: Some(2000),
+        status: SyncStatus::Completed,
+        objects_received: 3,
+        objects_sent: 1,
+    };
+    save_sync_session(&db.core, &s).await.unwrap();
+
+    let r = get_sync_session(&db.core, "sess-001").await.unwrap().unwrap();
+    assert_eq!(r.status, SyncStatus::Completed);
+    assert_eq!(r.objects_received, 3);
+}
+
+#[tokio::test]
+async fn sync_session_retention_purge() {
+    use taktakk_core::domain::sync::{SyncSession, SyncStatus, TransportKind};
+    use crate::repo::sync::{purge_old_sessions, save_sync_session};
+    let (db, _dir) = open_test_db().await;
+
+    let make = |id: &str, ended_at: Option<i64>| SyncSession {
+        session_id: id.to_string(),
+        peer_ephemeral_id: "p".to_string(),
+        transport: TransportKind::SdCard,
+        started_at: 0,
+        completed_at: ended_at,
+        status: SyncStatus::Completed,
+        objects_received: 0,
+        objects_sent: 0,
+    };
+
+    save_sync_session(&db.core, &make("s1", Some(100))).await.unwrap();
+    save_sync_session(&db.core, &make("s2", Some(5000))).await.unwrap();
+    save_sync_session(&db.core, &make("s3", None)).await.unwrap(); // still running
+
+    // Purge sessions ended before cutoff = now(10000) - retention(8000) = 2000
+    let purged = purge_old_sessions(&db.core, 10_000, 8000).await.unwrap();
+    assert_eq!(purged, 1); // only s1 (ended_at=100) is old enough
+}
+
+#[tokio::test]
+async fn import_job_lifecycle() {
+    use crate::repo::sync::{complete_import_job, start_import_job};
+    let (db, _dir) = open_test_db().await;
+
+    start_import_job(&db.core, "job-001", "sdcard", Some("hashed-path"), 1000)
+        .await.unwrap();
+    complete_import_job(&db.core, "job-001", 3, 2000)
+        .await.unwrap();
+
+    let (status, count): (String, i64) = sqlx::query_as(
+        "SELECT status, installed_count FROM import_jobs WHERE import_job_id = 'job-001'"
+    )
+    .fetch_one(&db.core).await.unwrap();
+
+    assert_eq!(status, "installed");
+    assert_eq!(count, 3);
+}
