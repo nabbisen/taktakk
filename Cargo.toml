@@ -1,0 +1,44 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/*",
+    "apps/*",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["nabbisen"]
+license = "Apache-2.0"
+repository = "https://github.com/nabbisen/taktakk"
+documentation = "https://docs.rs/taktakk"
+categories = []
+keywords = []
+
+[workspace.dependencies]
+# Serialization / Data
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Storage
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "tls-native-tls"] }
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# Security & Crypto
+ed25519-dalek = { version = "2", features = ["serde"] }
+rand = "0.8"
+sha2 = "0.10"
+argon2 = "0.5"
+zeroize = { version = "1", features = ["derive"] }
+
+# Error Handling
+thiserror = "2"
+anyhow = "1"
+
+# Utilities
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+hex = "0.4"
